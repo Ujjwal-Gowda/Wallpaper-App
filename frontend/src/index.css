@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 html, body, #root {
-  width: 100vw;
+  width: 100%;
   min-height: 100vh;
   margin: 0;
   padding: 0;
@@ -18,35 +18,27 @@ html, body, #root {
 }
 
 /* Ensure DaisyUI themes work properly */
-[data-theme] {
+[data-theme="light"] {
   color-scheme: light;
 }
 
-[data-theme="dark"], 
-[data-theme="synthwave"], 
-[data-theme="halloween"], 
-[data-theme="forest"], 
-[data-theme="black"], 
-[data-theme="luxury"], 
-[data-theme="dracula"], 
-[data-theme="night"],
-[data-theme="coffee"] {
+[data-theme="dark"] {
   color-scheme: dark;
 }
 
-/* Remove custom hard-coded colors so DaisyUI themes work */
+/* Links */
 a {
   font-weight: 500;
   text-decoration: inherit;
 }
+
 a:hover {
   text-decoration: underline;
 }
 
+/* Body - Let DaisyUI handle colors */
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
   min-height: 100vh;
 }

@@ -14,6 +14,8 @@ export const API_ENDPOINTS = {
   PROFILE: `${API_BASE_URL}/profile`,
 
   EXTERNAL_IMAGES: `${API_BASE_URL}/external`,
+  EXTERNAL_IMAGE_DETAIL: (id) => `${API_BASE_URL}/external/${id}`,
+  EXTERNAL_IMAGE_RELATED: (id) => `${API_BASE_URL}/external/${id}/related`,
   ALL_FAVORITES: `${API_BASE_URL}/images/all-favorites`,
   EXTERNAL_FAVORITE: `${API_BASE_URL}/images/external-favorite`,
   EXTERNAL_FAVORITE_CHECK: (id) =>

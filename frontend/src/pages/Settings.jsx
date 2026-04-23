@@ -1,12 +1,12 @@
 import { useTheme } from "../context/ThemeContext.jsx";
-import { Palette, Check, Moon, Sun, Sparkles } from "lucide-react";
+import { Palette, Check, Sparkles } from "lucide-react";
 
 const themes = [
   { name: "light", icon: "☀️", desc: "Clean & Bright", category: "Basic" },
   { name: "dark", icon: "🌙", desc: "Easy on Eyes", category: "Basic" },
 ];
 
-const categories = [...new Set(themes.map(t => t.category))];
+const categories = ["Basic"];
 
 export default function Settings() {
   const { theme, changeTheme } = useTheme();
@@ -37,18 +37,15 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Theme Categories */}
-        {categories.map(category => (
-          <div key={category} className="mb-8">
-            <h3 className="text-2xl font-semibold text-base-content mb-4 flex items-center gap-2">
-              <Sparkles size={20} className="text-primary" />
-              {category}
-            </h3>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {themes
-                .filter(t => t.category === category)
-                .map((themeOption) => (
+        {/* Theme Selection */}
+        <div className="mb-8">
+          <h3 className="text-2xl font-semibold text-base-content mb-4 flex items-center gap-2">
+            <Sparkles size={20} className="text-primary" />
+            Choose Your Theme
+          </h3>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
+              {themes.map((themeOption) => (
                 <div
                   key={themeOption.name}
                   className={`card bg-base-200 hover:bg-base-300 cursor-pointer transition-all duration-200 hover:scale-105 border-2 ${
@@ -61,7 +58,7 @@ export default function Settings() {
                     <div className="text-3xl mb-2">
                       {themeOption.icon}
                     </div>
-                    
+
                     {/* Theme Name */}
                     <h4 className="font-semibold text-base-content capitalize flex items-center justify-center gap-2">
                       {themeOption.name}
@@ -69,21 +66,21 @@ export default function Settings() {
                         <Check size={16} className="text-primary" />
                       )}
                     </h4>
-                    
+
                     {/* Theme Description */}
                     <p className="text-sm text-base-content/70 mt-1">
                       {themeOption.desc}
                     </p>
-                    
+
                     {/* Color Preview */}
-                    <div 
-                      className="w-full h-3 rounded-full mt-3 border border-base-300" 
+                    <div
+                      className="w-full h-3 rounded-full mt-3 border border-base-300"
                       data-theme={themeOption.name}
                       style={{
                         background: 'linear-gradient(90deg, hsl(var(--p)), hsl(var(--s)), hsl(var(--a)))'
                       }}
                     />
-                    
+
                     {/* Active Indicator */}
                     {theme === themeOption.name && (
                       <div className="badge badge-primary badge-sm mt-2">
@@ -92,15 +89,14 @@ export default function Settings() {
                     )}
                   </div>
                 </div>
-              ))}
-            </div>
+            ))}
           </div>
-        ))}
+        </div>
 
         {/* Tips Section */}
         <div className="alert alert-info mt-8">
           <div className="flex items-center gap-2">
-            <Sun className="text-info" size={20} />
+            <Sparkles className="text-info" size={20} />
             <div>
               <h4 className="font-semibold">Pro Tip:</h4>
               <p className="text-sm">Your theme preference is automatically saved and will be applied across all pages!</p>

@@ -1,16 +1,33 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Masonry from "react-masonry-css";
-import { Heart } from "lucide-react";
+import { Heart, Search, Loader2, X } from "lucide-react";
 import axios from "axios";
 import { API_ENDPOINTS } from "../config/api.js";
+import ImageModal from "./ImageModal.jsx";
 
 export default function MasonryGrid() {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [query, setQuery] = useState("");
   const [searchText, setSearchText] = useState("");
   const [favoriteStatus, setFavoriteStatus] = useState({});
   const [isMobile, setIsMobile] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [selectedImage, setSelectedImage] = useState(null);
+
+  const observer = useRef();
+  const lastImageRef = useCallback(node => {
+    if (loading || loadingMore) return;
+    if (observer.current) observer.current.disconnect();
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore) {
+        setPage(prevPage => prevPage + 1);
+      }
+    });
+    if (node) observer.current.observe(node);
+  }, [loading, loadingMore, hasMore]);
 
   // Detect mobile device
   useEffect(() => {
@@ -22,52 +39,61 @@ export default function MasonryGrid() {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // Reset when query changes
   useEffect(() => {
-  if (query) {
-    setImages([]); // ✅ clear local images when searching
-  }
-  fetchImages(query);
-}, [query]);
+    setImages([]);
+    setPage(1);
+    setHasMore(true);
+  }, [query]);
+
+  // Fetch when page or query changes
+  useEffect(() => {
+    fetchImages(query, page);
+  }, [query, page]);
 
 
   // Fetch images from backend API
-  async function fetchImages(q) {
+  async function fetchImages(q, p) {
     try {
-      
-      setLoading(true);
-      const res = await fetch(
-        `${API_ENDPOINTS.EXTERNAL_IMAGES}?query=${encodeURIComponent(q)}`
-      );
-      
+      if (p === 1) setLoading(true);
+      else setLoadingMore(true);
 
+      const res = await fetch(
+        `${API_ENDPOINTS.EXTERNAL_IMAGES}?query=${encodeURIComponent(q)}&page=${p}&per_page=20`
+      );
 
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
       }
       
       const data = await res.json();
+      const newItems = data.items || [];
+
+      if (newItems.length === 0) {
+        setHasMore(false);
+      }
 
       // merge old + new
       setImages((prev) => {
-        const seen = new Set();
-        return [...prev, ...(data.items || [])].filter((img) => {
-          if (seen.has(img.id)) return false; // duplicate → skip
-          seen.add(img.id);
-          return true;
-        });
+        if (p === 1) return newItems;
+        const seen = new Set(prev.map(img => img.id));
+        const filteredNew = newItems.filter(img => !seen.has(img.id));
+        return [...prev, ...filteredNew];
       });
 
       
       // Check favorite status for each image (if user is logged in)
       const token = localStorage.getItem("token");
-      if (token && data.items?.length > 0) {
-        checkFavoriteStatus(data.items);
+      if (token && newItems.length > 0) {
+        checkFavoriteStatus(newItems);
       }
     } catch (err) {
       console.error("Error fetching images:", err);
-      setImages([]);
+      if (p === 1) setImages([]);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }
 
@@ -79,7 +105,6 @@ export default function MasonryGrid() {
 
       const statusPromises = imageList.map(async (img) => {
         try {
-          // Skip backend check for local images, just set favorite to false by default
           if (img.id.startsWith("local") || img.type === "local") {
             return { id: img.id, isFavorite: false };
           }
@@ -93,13 +118,12 @@ export default function MasonryGrid() {
           );
           return { id: img.id, isFavorite: res.data.isFavorite };
         } catch (err) {
-          console.error(`Error checking favorite status for ${img.id}:`, err);
           return { id: img.id, isFavorite: false };
         }
       });
 
       const statusResults = await Promise.all(statusPromises);
-      const statusMap = {};
+      const statusMap = { ...favoriteStatus };
       statusResults.forEach(({ id, isFavorite }) => {
         statusMap[id] = isFavorite;
       });
@@ -109,10 +133,6 @@ export default function MasonryGrid() {
     }
   }
 
-  useEffect(() => {
-    fetchImages(query);
-  }, [query]);
-
   const toggleFavorite = async (img) => {
     try {
       const token = localStorage.getItem("token");
@@ -121,19 +141,14 @@ export default function MasonryGrid() {
         return;
       }
 
-      // Don't allow favoriting local images for now (they don't have backend support)
-
-
       const isFavorite = favoriteStatus[img.id] || false;
 
       if (isFavorite) {
-        // Remove from favorites
         await axios.delete(API_ENDPOINTS.EXTERNAL_FAVORITE_REMOVE(img.id), {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 10000
         });
       } else {
-        // Add to favorites
         await axios.post(
           API_ENDPOINTS.EXTERNAL_FAVORITE,
           {
@@ -141,7 +156,7 @@ export default function MasonryGrid() {
             url: img.url,
             thumb: img.thumb,
             author: img.author,
-            title: `Image by ${img.author}`
+            title: img.description || `Image by ${img.author}`
           },
           {
             headers: { Authorization: `Bearer ${token}` },
@@ -150,7 +165,6 @@ export default function MasonryGrid() {
         );
       }
 
-      // Update local state
       setFavoriteStatus(prev => ({
         ...prev,
         [img.id]: !isFavorite
@@ -158,13 +172,6 @@ export default function MasonryGrid() {
 
     } catch (err) {
       console.error("Error toggling favorite:", err);
-      if (err.response?.status === 401) {
-        alert("Please login to add favorites");
-      } else if (err.code === 'ECONNABORTED') {
-        alert("Request timed out. Please try again.");
-      } else {
-        alert("Error updating favorite. Please try again.");
-      }
     }
   };
 
@@ -175,103 +182,148 @@ export default function MasonryGrid() {
     500: 1,
   };
 
+  const handleSearch = (e) => {
+    if (e) e.preventDefault();
+    setQuery(searchText);
+  };
+
   return (
     <div className="p-4 ml-20 bg-base-100 min-h-screen">
-      {/* Search Bar */}
-      <div className="flex justify-center mb-6">
-        <input
-          type="text"
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          placeholder="Search images..."
-          className="input input-bordered w-full max-w-xl"
-          onKeyPress={(e) => e.key === 'Enter' && setQuery(searchText)}
-        />
-        <button
-          onClick={() => setQuery(searchText)}
-          className="btn btn-primary ml-2"
-        >
-          Search
-        </button>
+      {/* Search Bar & Home Button */}
+      <div className="flex flex-col items-center mb-12 mt-6">
+        <form onSubmit={handleSearch} className="flex justify-center w-full">
+          <div className="relative w-full max-w-2xl group">
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Search high-quality wallpapers..."
+              className="input input-bordered w-full pl-12 h-14 rounded-2xl shadow-sm focus:shadow-md transition-all duration-300 bg-base-100 text-base-content"
+            />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-base-content/40 group-focus-within:text-primary transition-colors" size={24} />
+            <button
+              type="submit"
+              className="absolute right-2 top-2 btn btn-primary rounded-xl px-6"
+            >
+              Search
+            </button>
+          </div>
+        </form>
+
+        {query && (
+          <div className="mt-6 flex items-center gap-4">
+            <h2 className="text-2xl font-bold text-base-content">
+              Results for <span className="text-primary">"{query}"</span>
+            </h2>
+            <button 
+              onClick={() => {
+                setQuery("");
+                setSearchText("");
+              }}
+              className="btn btn-ghost btn-sm rounded-full gap-2 border border-base-300"
+            >
+              <X size={16} /> Clear & Return Home
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Masonry Grid */}
-      {loading ? (
-        <div className="flex justify-center items-center h-64">
+      {loading && images.length === 0 ? (
+        <div className="flex flex-col justify-center items-center h-64 gap-4">
           <span className="loading loading-spinner loading-lg text-primary"></span>
+          <p className="text-base-content/60 animate-pulse">Finding the best wallpapers...</p>
         </div>
       ) : images.length === 0 ? (
         <div className="text-center py-20">
-          <p className="text-base-content/70 text-lg">No images found</p>
+          <div className="max-w-md mx-auto">
+            <h3 className="text-2xl font-bold mb-2">No results found</h3>
+            <p className="text-base-content/60">We couldn't find any images matching "{query}". Try different keywords.</p>
+          </div>
         </div>
       ) : (
-        <Masonry
-          breakpointCols={breakpointColumnsObj}
-          className="flex gap-4"
-          columnClassName="bg-clip-padding"
-        >
-          {images.map((img) => {
-            const isFavorite = favoriteStatus[img.id] || false;
-            
-            return (
-              <div key={img.id} className="relative group mb-4">
-                <a
-                  href={img.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block"
+        <>
+          <Masonry
+            breakpointCols={breakpointColumnsObj}
+            className="flex gap-6"
+            columnClassName="bg-clip-padding"
+          >
+            {images.map((img, index) => {
+              const isFavorite = favoriteStatus[img.id] || false;
+              const isLastElement = images.length === index + 1;
+              
+              return (
+                <div 
+                  key={`${img.id}-${index}`} 
+                  ref={isLastElement ? lastImageRef : null}
+                  className="relative group mb-6 cursor-zoom-in"
+                  onClick={() => setSelectedImage(img)}
                 >
-                  <img
-                    src={img.thumb}
-                    alt={img.author}
-                    className="w-full rounded-xl shadow-md hover:scale-[1.02] transition border border-base-300"
-                    loading="lazy"
-                  />
-                </a>
-                
-                {/* Favorite button - Always visible on mobile, hover on desktop */}
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    toggleFavorite(img);
-                  }}
-                  className={`absolute top-2 right-2 btn btn-circle transition-all duration-200 
-                    ${isMobile 
-                      ? 'opacity-90'   // always visible on mobile
-                      : 'opacity-0 group-hover:opacity-100'} 
-                    ${isFavorite 
-                      ? 'btn-error text-pink-800' 
-                      : 'btn-ghost bg-base-100/90 hover:btn-error'}
-                  `}
-                  style={{ width: "40px", height: "40px" }} // bigger tap target
-                >
-                  <Heart 
-                    size={32} // slightly bigger
-                    fill={isFavorite ? "currentColor" : "none"} 
-                  />
-                </button>
-
-
-                {/* Image type indicator - show if local image */}
-                {(img.id.startsWith("local") || img.type === "local") && (
-                  <div className={`absolute top-2 left-2 badge badge-primary badge-sm transition-opacity ${
-                    isMobile ? 'opacity-80' : 'opacity-0 group-hover:opacity-100'
-                  }`}>
-                    Local
+                  <div className="overflow-hidden rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 border border-base-300 bg-base-200">
+                    <img
+                      src={img.thumb}
+                      alt={img.author}
+                      className="w-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out min-h-[100px]"
+                      loading="lazy"
+                    />
                   </div>
-                )}
+                  
+                  {/* Favorite button */}
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      toggleFavorite(img);
+                    }}
+                    className={`absolute top-3 right-3 btn btn-circle btn-sm md:btn-md transition-all duration-300 
+                      ${isMobile ? 'opacity-90' : 'opacity-0 group-hover:opacity-100'} 
+                      ${isFavorite ? 'btn-error text-white' : 'btn-ghost bg-base-100/80 backdrop-blur-sm hover:btn-error'}
+                    `}
+                  >
+                    <Heart 
+                      size={isMobile ? 20 : 24} 
+                      fill={isFavorite ? "currentColor" : "none"} 
+                    />
+                  </button>
 
-                {/* Author info - Always show on mobile, hover on desktop */}
-                <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-base-300/90 to-transparent text-base-content p-3 rounded-b-xl transition-opacity ${
-                  isMobile ? 'opacity-80' : 'opacity-0 group-hover:opacity-100'
-                }`}>
-                  <p className="text-sm font-medium">by {img.author}</p>
+                  {/* Author info */}
+                  <div className={`absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/60 to-transparent text-white rounded-b-2xl transition-opacity duration-300 ${
+                    isMobile ? 'opacity-90' : 'opacity-0 group-hover:opacity-100'
+                  }`}>
+                    <p className="text-sm font-semibold truncate">by {img.author}</p>
+                  </div>
+
+                  {(img.id.startsWith("local") || img.type === "local") && (
+                    <div className="absolute top-3 left-3 badge badge-primary font-bold">Local</div>
+                  )}
                 </div>
-              </div>
-            );
-          })}
-        </Masonry>
+              );
+            })}
+          </Masonry>
+          
+          {loadingMore && (
+            <div className="flex justify-center py-10">
+              <Loader2 className="animate-spin text-primary" size={40} />
+            </div>
+          )}
+          
+          {!hasMore && images.length > 0 && (
+            <div className="text-center py-10 opacity-60">
+              <p>You've reached the end of the collection ✨</p>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Image Detail Modal */}
+      {selectedImage && (
+        <ImageModal 
+          image={selectedImage} 
+          onClose={() => setSelectedImage(null)} 
+          toggleFavorite={toggleFavorite}
+          isFavorite={favoriteStatus[selectedImage.id] || false}
+          onImageSelect={(img) => setSelectedImage(img)}
+        />
       )}
     </div>
   );
