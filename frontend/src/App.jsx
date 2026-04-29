@@ -10,6 +10,8 @@ import { BrowserRouter as Router, Routes, Route, useLocation } from "react-route
 import SidebarMenu from "./components/menu.jsx";
 import { Navigate } from "react-router-dom";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
+import { SearchProvider } from "./context/SearchContext.jsx";
+import { AuthProvider } from "./context/AuthContext.jsx";
 
 function Layout() {
   const location = useLocation();
@@ -71,9 +73,13 @@ function Layout() {
 export default function App() {
   return (
     <ThemeProvider>
-      <Router>
-        <Layout />
-      </Router>
+      <AuthProvider>
+        <SearchProvider>
+          <Router>
+            <Layout />
+          </Router>
+        </SearchProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

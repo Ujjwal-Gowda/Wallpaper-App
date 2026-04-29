@@ -4,13 +4,13 @@ import { Heart, Search, Loader2, X } from "lucide-react";
 import axios from "axios";
 import { API_ENDPOINTS } from "../config/api.js";
 import ImageModal from "./ImageModal.jsx";
+import { useSearch } from "../context/SearchContext.jsx";
 
 export default function MasonryGrid() {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [query, setQuery] = useState("");
-  const [searchText, setSearchText] = useState("");
+  const { query, setQuery, searchText, setSearchText, clearSearch } = useSearch();
   const [favoriteStatus, setFavoriteStatus] = useState({});
   const [isMobile, setIsMobile] = useState(false);
   const [page, setPage] = useState(1);
@@ -18,26 +18,34 @@ export default function MasonryGrid() {
   const [selectedImage, setSelectedImage] = useState(null);
 
   const observer = useRef();
-  const lastImageRef = useCallback(node => {
-    if (loading || loadingMore) return;
-    if (observer.current) observer.current.disconnect();
-    observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMore) {
-        setPage(prevPage => prevPage + 1);
-      }
-    });
-    if (node) observer.current.observe(node);
-  }, [loading, loadingMore, hasMore]);
+  const lastImageRef = useCallback(
+    (node) => {
+      if (loading || loadingMore) return;
+      if (observer.current) observer.current.disconnect();
+      observer.current = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && hasMore) {
+          setPage((prevPage) => prevPage + 1);
+        }
+      });
+      if (node) observer.current.observe(node);
+    },
+    [loading, loadingMore, hasMore],
+  );
 
   // Detect mobile device
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile(window.innerWidth <= 768 || /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
+      setIsMobile(
+        window.innerWidth <= 768 ||
+          /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+            navigator.userAgent,
+          ),
+      );
     };
-    
+
     checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
   // Reset when query changes
@@ -52,7 +60,6 @@ export default function MasonryGrid() {
     fetchImages(query, page);
   }, [query, page]);
 
-
   // Fetch images from backend API
   async function fetchImages(q, p) {
     try {
@@ -60,13 +67,13 @@ export default function MasonryGrid() {
       else setLoadingMore(true);
 
       const res = await fetch(
-        `${API_ENDPOINTS.EXTERNAL_IMAGES}?query=${encodeURIComponent(q)}&page=${p}&per_page=20`
+        `${API_ENDPOINTS.EXTERNAL_IMAGES}?query=${encodeURIComponent(q)}&page=${p}&per_page=20`,
       );
 
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
       }
-      
+
       const data = await res.json();
       const newItems = data.items || [];
 
@@ -77,12 +84,11 @@ export default function MasonryGrid() {
       // merge old + new
       setImages((prev) => {
         if (p === 1) return newItems;
-        const seen = new Set(prev.map(img => img.id));
-        const filteredNew = newItems.filter(img => !seen.has(img.id));
+        const seen = new Set(prev.map((img) => img.id));
+        const filteredNew = newItems.filter((img) => !seen.has(img.id));
         return [...prev, ...filteredNew];
       });
 
-      
       // Check favorite status for each image (if user is logged in)
       const token = localStorage.getItem("token");
       if (token && newItems.length > 0) {
@@ -111,10 +117,10 @@ export default function MasonryGrid() {
 
           const res = await axios.get(
             API_ENDPOINTS.EXTERNAL_FAVORITE_CHECK(img.id),
-            { 
+            {
               headers: { Authorization: `Bearer ${token}` },
-              timeout: 5000
-            }
+              timeout: 5000,
+            },
           );
           return { id: img.id, isFavorite: res.data.isFavorite };
         } catch (err) {
@@ -146,7 +152,7 @@ export default function MasonryGrid() {
       if (isFavorite) {
         await axios.delete(API_ENDPOINTS.EXTERNAL_FAVORITE_REMOVE(img.id), {
           headers: { Authorization: `Bearer ${token}` },
-          timeout: 10000
+          timeout: 10000,
         });
       } else {
         await axios.post(
@@ -156,20 +162,19 @@ export default function MasonryGrid() {
             url: img.url,
             thumb: img.thumb,
             author: img.author,
-            title: img.description || `Image by ${img.author}`
+            title: img.description || `Image by ${img.author}`,
           },
           {
             headers: { Authorization: `Bearer ${token}` },
-            timeout: 10000
-          }
+            timeout: 10000,
+          },
         );
       }
 
-      setFavoriteStatus(prev => ({
+      setFavoriteStatus((prev) => ({
         ...prev,
-        [img.id]: !isFavorite
+        [img.id]: !isFavorite,
       }));
-
     } catch (err) {
       console.error("Error toggling favorite:", err);
     }
@@ -200,7 +205,10 @@ export default function MasonryGrid() {
               placeholder="Search high-quality wallpapers..."
               className="input input-bordered w-full pl-12 h-14 rounded-2xl shadow-sm focus:shadow-md transition-all duration-300 bg-base-100 text-base-content"
             />
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-base-content/40 group-focus-within:text-primary transition-colors" size={24} />
+            <Search
+              className="absolute left-4 top-1/2 -translate-y-1/2 text-base-content/40 group-focus-within:text-primary transition-colors"
+              size={24}
+            />
             <button
               type="submit"
               className="absolute right-2 top-2 btn btn-primary rounded-xl px-6"
@@ -215,15 +223,6 @@ export default function MasonryGrid() {
             <h2 className="text-2xl font-bold text-base-content">
               Results for <span className="text-primary">"{query}"</span>
             </h2>
-            <button 
-              onClick={() => {
-                setQuery("");
-                setSearchText("");
-              }}
-              className="btn btn-ghost btn-sm rounded-full gap-2 border border-base-300"
-            >
-              <X size={16} /> Clear & Return Home
-            </button>
           </div>
         )}
       </div>
@@ -232,13 +231,18 @@ export default function MasonryGrid() {
       {loading && images.length === 0 ? (
         <div className="flex flex-col justify-center items-center h-64 gap-4">
           <span className="loading loading-spinner loading-lg text-primary"></span>
-          <p className="text-base-content/60 animate-pulse">Finding the best wallpapers...</p>
+          <p className="text-base-content/60 animate-pulse">
+            Finding the best wallpapers...
+          </p>
         </div>
       ) : images.length === 0 ? (
         <div className="text-center py-20">
           <div className="max-w-md mx-auto">
             <h3 className="text-2xl font-bold mb-2">No results found</h3>
-            <p className="text-base-content/60">We couldn't find any images matching "{query}". Try different keywords.</p>
+            <p className="text-base-content/60">
+              We couldn't find any images matching "{query}". Try different
+              keywords.
+            </p>
           </div>
         </div>
       ) : (
@@ -251,10 +255,10 @@ export default function MasonryGrid() {
             {images.map((img, index) => {
               const isFavorite = favoriteStatus[img.id] || false;
               const isLastElement = images.length === index + 1;
-              
+
               return (
-                <div 
-                  key={`${img.id}-${index}`} 
+                <div
+                  key={`${img.id}-${index}`}
                   ref={isLastElement ? lastImageRef : null}
                   className="relative group mb-6 cursor-zoom-in"
                   onClick={() => setSelectedImage(img)}
@@ -267,7 +271,7 @@ export default function MasonryGrid() {
                       loading="lazy"
                     />
                   </div>
-                  
+
                   {/* Favorite button */}
                   <button
                     onClick={(e) => {
@@ -275,38 +279,46 @@ export default function MasonryGrid() {
                       e.stopPropagation();
                       toggleFavorite(img);
                     }}
-                    className={`absolute top-3 right-3 btn btn-circle btn-sm md:btn-md transition-all duration-300 
-                      ${isMobile ? 'opacity-90' : 'opacity-0 group-hover:opacity-100'} 
-                      ${isFavorite ? 'btn-error text-white' : 'btn-ghost bg-base-100/80 backdrop-blur-sm hover:btn-error'}
-                    `}
+                    className={`absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 
+                    ${isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100"}
+                    ${isFavorite ? "bg-red-500 text-white" : "bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"}
+`}
                   >
-                    <Heart 
-                      size={isMobile ? 20 : 24} 
-                      fill={isFavorite ? "currentColor" : "none"} 
+                    <Heart
+                      size={isMobile ? 20 : 24}
+                      fill={isFavorite ? "currentColor" : "none"}
                     />
                   </button>
 
                   {/* Author info */}
-                  <div className={`absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/60 to-transparent text-white rounded-b-2xl transition-opacity duration-300 ${
-                    isMobile ? 'opacity-90' : 'opacity-0 group-hover:opacity-100'
-                  }`}>
-                    <p className="text-sm font-semibold truncate">by {img.author}</p>
+                  <div
+                    className={`absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/60 to-transparent text-white rounded-b-2xl transition-opacity duration-300 ${
+                      isMobile
+                        ? "opacity-90"
+                        : "opacity-0 group-hover:opacity-100"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold truncate">
+                      by {img.author}
+                    </p>
                   </div>
 
                   {(img.id.startsWith("local") || img.type === "local") && (
-                    <div className="absolute top-3 left-3 badge badge-primary font-bold">Local</div>
+                    <div className="absolute top-3 left-3 badge badge-primary font-bold">
+                      Local
+                    </div>
                   )}
                 </div>
               );
             })}
           </Masonry>
-          
+
           {loadingMore && (
             <div className="flex justify-center py-10">
               <Loader2 className="animate-spin text-primary" size={40} />
             </div>
           )}
-          
+
           {!hasMore && images.length > 0 && (
             <div className="text-center py-10 opacity-60">
               <p>You've reached the end of the collection ✨</p>
@@ -317,9 +329,9 @@ export default function MasonryGrid() {
 
       {/* Image Detail Modal */}
       {selectedImage && (
-        <ImageModal 
-          image={selectedImage} 
-          onClose={() => setSelectedImage(null)} 
+        <ImageModal
+          image={selectedImage}
+          onClose={() => setSelectedImage(null)}
           toggleFavorite={toggleFavorite}
           isFavorite={favoriteStatus[selectedImage.id] || false}
           onImageSelect={(img) => setSelectedImage(img)}

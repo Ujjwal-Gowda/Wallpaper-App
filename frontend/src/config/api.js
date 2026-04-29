@@ -5,6 +5,10 @@ const API_BASE_URL = isProduction
   ? "https://wallpaper-app-1-9rq5.onrender.com/api"
   : "http://localhost:5000/api";
 
+const SOCKET_URL = isProduction
+  ? "https://wallpaper-app-1-9rq5.onrender.com"
+  : "http://localhost:5000";
+
 export const API_ENDPOINTS = {
   LOGIN: `${API_BASE_URL}/auth/login`,
   REGISTER: `${API_BASE_URL}/auth/register`,
@@ -33,4 +37,4 @@ export const API_ENDPOINTS = {
 
 console.log("🚀 API Base URL:", API_BASE_URL);
 
-export { API_BASE_URL };
+export { API_BASE_URL, SOCKET_URL };

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import axios from "axios";
 import dotenv from "dotenv";
+import { Image } from "../models/image.js";
 dotenv.config();
 
 const router = Router();
@@ -54,17 +55,37 @@ router.get("/", async (req, res, next) => {
       ...img,
       url: `${baseUrl}/static-images/${img.url}`,
       thumb: `${baseUrl}/static-images/${img.url}`,
-      type: "local" // Add type for easier identification
+      type: "local"
     }));
+
+    // Fetch user-uploaded images from database
+    const dbImages = await Image.find(query ? {
+      $or: [
+        { Title: new RegExp(query, "i") },
+        { tags: new RegExp(query, "i") }
+      ]
+    } : {}).sort({ createdAt: -1 }).populate("owner", "name");
+
+    const formattedDbImages = dbImages.map(img => ({
+      id: img._id.toString(),
+      url: img.url,
+      thumb: img.url,
+      author: img.owner?.name || "User",
+      description: img.Title,
+      type: "local",
+      tags: img.tags
+    }));
+
+    const allLocalImages = [...formattedDbImages, ...localImages];
 
     if (!query) {
       // Pagination for local images
       const start = (pageNum - 1) * perPageNum;
       const end = start + perPageNum;
-      const paginatedLocal = localImages.slice(start, end);
+      const paginatedLocal = allLocalImages.slice(start, end);
       return res.json({ 
         items: paginatedLocal,
-        total_pages: Math.ceil(localImages.length / perPageNum)
+        total_pages: Math.ceil(allLocalImages.length / perPageNum)
       });
     }
 
@@ -73,7 +94,7 @@ router.get("/", async (req, res, next) => {
       console.warn("UNSPLASH_ACCESS_KEY not configured, returning local images only");
       const start = (pageNum - 1) * perPageNum;
       const end = start + perPageNum;
-      return res.json({ items: localImages.slice(start, end) });
+      return res.json({ items: allLocalImages.slice(start, end) });
     }
 
     try {
@@ -96,7 +117,7 @@ router.get("/", async (req, res, next) => {
       }));
 
       res.json({ 
-        items: unsplashItems,
+        items: [...formattedDbImages, ...unsplashItems],
         total_pages: r.data.total_pages
       });
     } catch (unsplashError) {

@@ -4,6 +4,12 @@ import express from "express";
 import path from "path";
 import { ConnectDB } from "./src/db.js";
 import { fileURLToPath } from "url";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import { Message } from "./src/models/message.js";
+import { Image } from "./src/models/image.js";
+import { User } from "./src/models/user.js";
+import { sendNotificationEmail } from "./src/utils/notifications.js";
 import authRouter from "./src/routes/auth.js";
 import imagesRouter from "./src/routes/images.js";
 import imageRoute from "./src/routes/external.js";
@@ -165,9 +171,65 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: corsOptions
+});
+
+io.on("connection", (socket) => {
+  console.log("A user connected:", socket.id);
+
+  socket.on("join_room", (imageId) => {
+    socket.join(imageId);
+    console.log(`User ${socket.id} joined room ${imageId}`);
+    
+    // Send existing messages
+    Message.find({ imageId })
+      .sort({ createdAt: 1 })
+      .populate("sender", "name email")
+      .then(messages => {
+        socket.emit("chat_history", messages);
+      })
+      .catch(err => console.error("Error fetching chat history:", err));
+  });
+
+  socket.on("send_message", async (data) => {
+    const { imageId, senderId, text } = data;
+    try {
+      const message = await Message.create({
+        imageId,
+        sender: senderId,
+        text
+      });
+      
+      const populatedMessage = await message.populate("sender", "name email");
+      io.to(imageId).emit("receive_message", populatedMessage);
+
+      // Notification Logic
+      // Check if image is local (uploaded by user)
+      if (imageId.length === 24) { // Assuming MongoDB ObjectId length
+        const image = await Image.findById(imageId).populate("owner");
+        if (image && image.owner && String(image.owner._id) !== String(senderId)) {
+          const sender = await User.findById(senderId);
+          await sendNotificationEmail(
+            image.owner.email,
+            image.Title || "Wallpaper",
+            sender ? sender.name : "A user"
+          );
+        }
+      }
+    } catch (err) {
+      console.error("Error saving message:", err);
+    }
+  });
+
+  socket.on("disconnect", () => {
+    console.log("User disconnected:", socket.id);
+  });
+});
 
 // Start server and attempt database connection
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(` Server running on port ${PORT}`);
   console.log(` Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(` Health check: http://localhost:${PORT}/health`);

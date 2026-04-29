@@ -1,17 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback } from "react";
 import { API_ENDPOINTS } from "../config/api.js";
+import { useAuth as useAuthContext } from "../context/AuthContext.jsx";
 
 export function useAuth() {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem("token"));
+  const context = useAuthContext();
+  const { token, logout } = context;
 
-  useEffect(() => {
-  if (token) {
-    checkAuth();
-  }
-}, [token, checkAuth]);
-
-  // Register new user
   const register = useCallback(async (email, password, name) => {
     const res = await fetch(API_ENDPOINTS.REGISTER, {
       method: "POST",
@@ -24,55 +18,10 @@ export function useAuth() {
     return data;
   }, []);
 
-  // Login user
-  const login = useCallback(async (email, password) => {
-    const res = await fetch(API_ENDPOINTS.LOGIN, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      body: JSON.stringify({ email, password }),
-    });
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || "Login failed");
-
-    localStorage.setItem("token", data.token);
-    localStorage.setItem("user", JSON.stringify(data.user));
-    setToken(data.token);
-    setUser(data.user);
-    return data;
-  }, []);
-
-  // Logout user
-  const logout = useCallback(async () => {
-    try {
-      // Call backend logout if token exists
-      if (token) {
-        await fetch(API_ENDPOINTS.LOGOUT, { 
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${token}`,
-            "Content-Type": "application/json"
-          }
-        });
-      }
-    } catch (err) {
-      console.error("Logout error:", err);
-    } finally {
-      // Clear local state regardless of backend response
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-      setToken(null);
-      setUser(null);
-    }
-  }, [token]);
-
-  // Fetch with token automatically
   const authFetch = useCallback(
     async (url, options = {}) => {
-      if (!token) throw new Error("Not authenticated");
+      const currentToken = localStorage.getItem("token");
+      if (!currentToken) throw new Error("Not authenticated");
 
       const fullUrl = url.startsWith('http') ? url : `${API_ENDPOINTS.API_BASE_URL}${url}`;
       
@@ -82,12 +31,12 @@ export function useAuth() {
           "Content-Type": "application/json",
           "Accept": "application/json",
           ...options.headers,
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${currentToken}`,
         },
       });
 
       if (res.status === 401) {
-        logout(); // auto-logout if token expired
+        logout();
         throw new Error("Unauthorized");
       }
 
@@ -98,38 +47,8 @@ export function useAuth() {
 
       return res.json();
     },
-    [token, logout]
+    [logout]
   );
-  // Check login status from backend
-const checkAuth = useCallback(async () => {
-  try {
-    const res = await fetch(API_ENDPOINTS.ME, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("token")}`,
-      },
-      credentials: "include", // ensure cookies/session are sent
-    });
 
-    if (!res.ok) throw new Error("Not authenticated");
-    const data = await res.json();
-
-    if (data?.user) {
-      setUser(data.user);
-      return data.user;
-    } else {
-      logout();
-      return null;
-    }
-  } catch (err) {
-    console.error("checkAuth failed:", err.message);
-    logout();
-    return null;
-  }
-}, [logout]);
-
-
-  return { user, token, register, login, logout, authFetch,checkAuth };
+  return { ...context, register, authFetch };
 }
