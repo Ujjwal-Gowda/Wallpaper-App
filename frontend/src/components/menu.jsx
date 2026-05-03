@@ -1,20 +1,19 @@
 import { useState, useEffect } from "react";
-import { Home, Settings, Heart, User, PlusCircle } from "lucide-react";
+import { Home, Settings, Heart, User, Upload } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useSearch } from "../context/SearchContext.jsx";
 import { useAuth } from "../hooks/useAuth.js";
-import UploadModal from "./UploadModal.jsx";
 
 export default function SidebarMenu() {
   const navigate = useNavigate();
   const location = useLocation();
   const { clearSearch } = useSearch();
   const { user } = useAuth();
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
 
   // Menu items
   const menuItems = [
     { id: "home", label: "Home", icon: <Home size={24} />, path: "/" },
+    { id: "upload", label: "Upload", icon: <Upload size={24} />, path: "/upload" },
     {
       id: "profile",
       label: "Profile",
@@ -42,7 +41,7 @@ export default function SidebarMenu() {
   useEffect(() => {
     const current = menuItems.find((item) => item.path === location.pathname);
     if (current) setActive(current.id);
-  }, [location]);
+  }, [location, menuItems]);
 
   // Handle navigation
   const handleNavigation = (item) => {
@@ -64,17 +63,6 @@ export default function SidebarMenu() {
 
       {/* Top Menu */}
       <nav className="flex flex-col items-center gap-3">
-        {user && (
-          <div className="tooltip tooltip-right" data-tip="Upload">
-            <button
-              onClick={() => setIsUploadOpen(true)}
-              className="btn btn-square btn-ghost hover:btn-primary hover:bg-primary/20 text-primary transition-all duration-300 hover:scale-110 mb-2"
-            >
-              <PlusCircle size={32} strokeWidth={2.5} />
-            </button>
-          </div>
-        )}
-        
         {menuItems
           .filter((item) => !item.bottom)
           .map((item) => (
@@ -138,16 +126,6 @@ export default function SidebarMenu() {
 
       {/* Optional: Theme indicator dot */}
       <div className="w-2 h-2 bg-accent rounded-full opacity-60 mb-2"></div>
-
-      {isUploadOpen && (
-        <UploadModal 
-          onClose={() => setIsUploadOpen(false)} 
-          onUploadSuccess={() => {
-            setIsUploadOpen(false);
-            window.location.reload(); // Refresh to show new image
-          }}
-        />
-      )}
     </div>
   );
 }

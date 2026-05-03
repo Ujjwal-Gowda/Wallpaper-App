@@ -1,4 +1,10 @@
-import React, { createContext, useState, useEffect, useContext, useCallback } from "react";
+import React, {
+  createContext,
+  useState,
+  useEffect,
+  useContext,
+  useCallback,
+} from "react";
 import { API_ENDPOINTS } from "../config/api.js";
 
 const AuthContext = createContext();
@@ -15,9 +21,9 @@ export const AuthProvider = ({ children }) => {
         await fetch(API_ENDPOINTS.LOGOUT, {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${currentToken}`,
-            "Content-Type": "application/json"
-          }
+            Authorization: `Bearer ${currentToken}`,
+            "Content-Type": "application/json",
+          },
         });
       }
     } catch (err) {
@@ -38,17 +44,23 @@ export const AuthProvider = ({ children }) => {
     }
 
     try {
-      const res = await fetch(API_ENDPOINTS.ME, {
+      // Backend route is /auth/verify, not /auth/me
+      const res = await fetch(API_ENDPOINTS.VERIFY, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
-          "Accept": "application/json",
+          Accept: "application/json",
           Authorization: `Bearer ${currentToken}`,
         },
-        credentials: "include",
       });
 
-      if (!res.ok) throw new Error("Not authenticated");
+      if (res.status === 401) {
+        logout();
+        return null;
+      }
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
       const data = await res.json();
 
       if (data?.user) {
@@ -61,9 +73,19 @@ export const AuthProvider = ({ children }) => {
       }
     } catch (err) {
       console.error("checkAuth failed:", err.message);
-      // Don't logout on network error, only on 401
-      if (err.message.includes("401") || err.message.includes("authenticated")) {
+      // Only logout on auth errors, not network failures
+      if (err.message.includes("401")) {
         logout();
+      } else {
+        // Network error — keep local token, hydrate user from localStorage
+        const stored = localStorage.getItem("user");
+        if (stored) {
+          try {
+            setUser(JSON.parse(stored));
+          } catch {
+            /* ignore parse error */
+          }
+        }
       }
       return null;
     } finally {
@@ -76,7 +98,7 @@ export const AuthProvider = ({ children }) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Accept": "application/json"
+        Accept: "application/json",
       },
       body: JSON.stringify({ email, password }),
     });
@@ -96,7 +118,18 @@ export const AuthProvider = ({ children }) => {
   }, [checkAuth]);
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout, checkAuth, setUser, setToken }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        loading,
+        login,
+        logout,
+        checkAuth,
+        setUser,
+        setToken,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

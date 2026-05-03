@@ -41,9 +41,10 @@ const defaultImages = [
 
 router.get("/", async (req, res, next) => {
   try {
-    const { query = "", page = 1, per_page = 25 } = req.query;
+    const { query = "", page = 1, per_page = 25, useUnsplash = "true" } = req.query;
     const pageNum = parseInt(page);
     const perPageNum = parseInt(per_page);
+    const shouldKeepUnsplash = useUnsplash === "true";
 
     // Use production URL for images when deployed
     const baseUrl = process.env.NODE_ENV === 'production' 
@@ -79,53 +80,56 @@ router.get("/", async (req, res, next) => {
     const allLocalImages = [...formattedDbImages, ...localImages];
 
     if (!query) {
-      // Pagination for local images
+      // Recommendation Logic: mix some random DB images with static ones
+      // If no query, we can also optionally fetch from Unsplash editorial/curated if allowed
+      let items = allLocalImages;
+      let total_pages = Math.ceil(allLocalImages.length / perPageNum);
+
+      if (shouldKeepUnsplash && UNSPLASH_KEY) {
+        try {
+          const r = await axios.get("https://api.unsplash.com/photos", {
+            params: { page: pageNum, per_page: perPageNum },
+            headers: { Authorization: `Client-ID ${UNSPLASH_KEY}` },
+            timeout: 5000
+          });
+          const unsplashItems = r.data.map(x => ({
+            id: x.id,
+            url: x.urls.regular,
+            thumb: x.urls.small || x.urls.thumb,
+            author: x.user.name,
+            type: "external",
+            description: x.description || x.alt_description || "",
+          }));
+          items = [...formattedDbImages.slice(0, 5), ...unsplashItems];
+          total_pages = 100; // Unsplash has many pages
+        } catch (err) {
+          console.error("Unsplash recommendation error:", err.message);
+        }
+      }
+
       const start = (pageNum - 1) * perPageNum;
       const end = start + perPageNum;
-      const paginatedLocal = allLocalImages.slice(start, end);
+      const paginatedItems = items.slice(start, end);
+      
       return res.json({ 
-        items: paginatedLocal,
-        total_pages: Math.ceil(allLocalImages.length / perPageNum)
+        items: paginatedItems,
+        total_pages: total_pages
       });
     }
 
-    // Search Unsplash if query provided
-    if (!UNSPLASH_KEY) {
-      console.warn("UNSPLASH_ACCESS_KEY not configured, returning local images only");
+    // Search Unsplash if query provided and allowed
+    if (!UNSPLASH_KEY || !shouldKeepUnsplash) {
+      console.warn("UNSPLASH_ACCESS_KEY not configured or disabled, returning local images only");
+      const filteredLocal = allLocalImages.filter(img => 
+        (img.Title && img.Title.toLowerCase().includes(query.toLowerCase())) ||
+        (img.tags && (Array.isArray(img.tags) ? img.tags.some(t => t.toLowerCase().includes(query.toLowerCase())) : img.tags.toLowerCase().includes(query.toLowerCase())))
+      );
       const start = (pageNum - 1) * perPageNum;
       const end = start + perPageNum;
-      return res.json({ items: allLocalImages.slice(start, end) });
-    }
-
-    try {
-      const r = await axios.get("https://api.unsplash.com/search/photos", {
-        params: { query, page: pageNum, per_page: perPageNum },
-        headers: { Authorization: `Client-ID ${UNSPLASH_KEY}` },
-        timeout: 10000 // 10 second timeout
+      return res.json({ 
+        items: filteredLocal.slice(start, end),
+        total_pages: Math.ceil(filteredLocal.length / perPageNum)
       });
-
-      const unsplashItems = r.data.results.map(x => ({
-        id: x.id,
-        url: x.urls.regular,
-        thumb: x.urls.small || x.urls.thumb,
-        full: x.urls.full,
-        author: x.user.name,
-        authorLink: x.user.links.html,
-        link: x.links.html,
-        type: "external",
-        description: x.description || x.alt_description || "",
-      }));
-
-      res.json({ 
-        items: [...formattedDbImages, ...unsplashItems],
-        total_pages: r.data.total_pages
-      });
-    } catch (unsplashError) {
-      console.error("Unsplash API error:", unsplashError.message);
-      // Fallback to local images if Unsplash fails
-      const start = (pageNum - 1) * perPageNum;
-      const end = start + perPageNum;
-      res.json({ items: localImages.slice(start, end) });
     }
   } catch (e) {
     console.error("External route error:", e);

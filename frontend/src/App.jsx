@@ -1,5 +1,6 @@
 import React from "react";
 import Home from "./pages/Home.jsx";
+import Upload from "./pages/Upload.jsx";
 import Profile from "./pages/profile.jsx";
 import Favourite from "./pages/favourite.jsx";
 import Settings from "./pages/Settings.jsx";
@@ -34,6 +35,14 @@ function Layout() {
             element={
               <PrivateRoute>
                 <Home />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/upload"
+            element={
+              <PrivateRoute>
+                <Upload />
               </PrivateRoute>
             }
           />

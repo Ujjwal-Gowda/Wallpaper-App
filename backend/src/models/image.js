@@ -18,12 +18,13 @@ const imageSchema=new mongoose.Schema({
         type:String,
         trim:true,
     },
-    tags:{
+    tags:[{
         type:String,
-    },
+    }],
 },{timestamps:true});
 
-imageSchema.index({ title: "text", tags: 1 });
+imageSchema.index({ Title: "text" });
+imageSchema.index({ tags: 1 });
 
 imageSchema.set("toJSON", {
   transform(doc, ret) {

@@ -10,12 +10,14 @@ export default function MasonryGrid() {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const { query, setQuery, searchText, setSearchText, clearSearch } = useSearch();
+  const { query, setQuery, searchText, setSearchText, clearSearch } =
+    useSearch();
   const [favoriteStatus, setFavoriteStatus] = useState({});
   const [isMobile, setIsMobile] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [useUnsplash, setUseUnsplash] = useState(import.meta.env.PROD);
 
   const observer = useRef();
   const lastImageRef = useCallback(
@@ -55,10 +57,10 @@ export default function MasonryGrid() {
     setHasMore(true);
   }, [query]);
 
-  // Fetch when page or query changes
+  // Fetch when page, query or useUnsplash changes
   useEffect(() => {
     fetchImages(query, page);
-  }, [query, page]);
+  }, [query, page, useUnsplash]);
 
   // Fetch images from backend API
   async function fetchImages(q, p) {
@@ -67,7 +69,7 @@ export default function MasonryGrid() {
       else setLoadingMore(true);
 
       const res = await fetch(
-        `${API_ENDPOINTS.EXTERNAL_IMAGES}?query=${encodeURIComponent(q)}&page=${p}&per_page=20`,
+        `${API_ENDPOINTS.EXTERNAL_IMAGES}?query=${encodeURIComponent(q)}&page=${p}&per_page=20&useUnsplash=${useUnsplash}`,
       );
 
       if (!res.ok) {
@@ -218,13 +220,36 @@ export default function MasonryGrid() {
           </div>
         </form>
 
-        {query && (
-          <div className="mt-6 flex items-center gap-4">
-            <h2 className="text-2xl font-bold text-base-content">
-              Results for <span className="text-primary">"{query}"</span>
-            </h2>
+        <div className="mt-4 flex flex-col items-center gap-4">
+          <div className="flex items-center gap-3 bg-base-200 p-2 px-4 rounded-full shadow-inner">
+            <span className="text-xs font-bold uppercase tracking-wider text-base-content/60">
+              Unsplash API
+            </span>
+            <input
+              type="checkbox"
+              className="toggle toggle-primary toggle-sm"
+              checked={useUnsplash}
+              onChange={() => {
+                setUseUnsplash(!useUnsplash);
+                setImages([]);
+                setPage(1);
+              }}
+            />
+            <span
+              className={`text-xs font-bold ${useUnsplash ? "text-primary" : "text-base-content/40"}`}
+            >
+              {useUnsplash ? "ON" : "OFF"}
+            </span>
           </div>
-        )}
+
+          {query && (
+            <div className="flex items-center gap-4">
+              <h2 className="text-2xl font-bold text-base-content">
+                Results for <span className="text-primary">"{query}"</span>
+              </h2>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Masonry Grid */}

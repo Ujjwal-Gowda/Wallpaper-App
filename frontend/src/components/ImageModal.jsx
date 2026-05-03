@@ -34,16 +34,17 @@ export default function ImageModal({
   const chatEndRef = useRef();
   const scrollContainerRef = useRef();
 
+  // Derive the current user's id robustly
+  const currentUserId = user?.id || user?._id;
+
   useEffect(() => {
     if (!image) return;
 
-    // Reset state for new image
     setLoadingRelated(true);
     setRelatedImages([]);
     setChatMessages([]);
     setChatInput("");
 
-    // Fetch related images
     axios
       .get(API_ENDPOINTS.EXTERNAL_IMAGE_RELATED(image.id))
       .then((r) => setRelatedImages(r.data.items || []))
@@ -52,7 +53,6 @@ export default function ImageModal({
 
     // Socket.io connection
     socketRef.current = io(SOCKET_URL);
-    
     socketRef.current.emit("join_room", image.id);
 
     socketRef.current.on("chat_history", (history) => {
@@ -60,7 +60,13 @@ export default function ImageModal({
     });
 
     socketRef.current.on("receive_message", (message) => {
-      setChatMessages((prev) => [...prev, message]);
+      setChatMessages((prev) => {
+        // Avoid duplicates
+        const exists = prev.some(
+          (m) => m.id === message.id || m._id === message._id,
+        );
+        return exists ? prev : [...prev, message];
+      });
     });
 
     return () => {
@@ -78,222 +84,381 @@ export default function ImageModal({
   }, []);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (activeTab === "chat") {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [chatMessages, activeTab]);
+
+  // Close on Escape key
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
 
   if (!image) return null;
 
   const title = image.description || image.Title || image.title || "Untitled";
 
-  const handleDownload = () => {
-    const a = document.createElement("a");
-    a.href = image.url;
-    a.download = `wallpaper-${image.id}.jpg`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  const handleDownload = async () => {
+    try {
+      const response = await fetch(image.url);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `wallpaper-${image.id}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      // Fallback for CORS-restricted images
+      const a = document.createElement("a");
+      a.href = image.url;
+      a.target = "_blank";
+      a.download = `wallpaper-${image.id}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
   };
 
-  const handleShare = () => {
-    const txt = `Check out this wallpaper by ${image.author}`;
+  const handleShare = async () => {
+    const shareUrl = image.link || window.location.href;
+    const txt = `Check out this wallpaper${image.author ? ` by ${image.author}` : ""}`;
     if (navigator.share) {
-      navigator.share({
-        title: "Wallpaper App",
-        text: txt,
-        url: image.link || window.location.href,
-      });
+      try {
+        await navigator.share({
+          title: "Wallpaper App",
+          text: txt,
+          url: shareUrl,
+        });
+      } catch (e) {
+        if (e.name !== "AbortError") {
+          await navigator.clipboard.writeText(shareUrl);
+          alert("Link copied to clipboard!");
+        }
+      }
     } else {
-      navigator.clipboard.writeText(image.link || window.location.href);
-      alert("Link copied!");
+      await navigator.clipboard.writeText(shareUrl);
+      alert("Link copied to clipboard!");
     }
   };
 
   const sendChat = () => {
     const msg = chatInput.trim();
-    if (!msg || !user) return;
-    
+    if (!msg || !user || !socketRef.current) return;
+
     socketRef.current.emit("send_message", {
       imageId: image.id,
-      senderId: user.id || user._id,
-      text: msg
+      senderId: currentUserId,
+      text: msg,
     });
-    
+
     setChatInput("");
+  };
+
+  const handleChatKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendChat();
+    }
+  };
+
+  // Sender ID comparison: backend populates sender with _id, but toJSON maps it to id
+  const isOwnMessage = (msg) => {
+    const senderId =
+      msg.sender?.id || msg.sender?._id?.toString() || msg.senderId?.toString();
+    return senderId === currentUserId?.toString();
   };
 
   const masonryBreaks = { default: 2, 1100: 1 };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex bg-black/90 overflow-hidden" data-theme={theme}>
-      {/* Container */}
-      <div className="flex flex-col md:flex-row w-full h-full bg-base-100 shadow-2xl relative ml-0 md:ml-20">
-        
-        {/* Close Button Mobile */}
-        <button 
-          onClick={onClose}
-          className="absolute top-4 right-4 z-50 btn btn-circle btn-sm btn-ghost md:hidden"
+    <>
+      {/* Solid overlay backdrop - no transparency issues */}
+      <div
+        className="fixed inset-0 z-[9998] bg-black/80"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* Modal panel */}
+      <div
+        className="fixed inset-0 z-[9999] flex pointer-events-none"
+        data-theme={theme}
+      >
+        <div
+          className="flex flex-col md:flex-row w-full h-full md:h-[96vh] md:w-[94vw] md:m-auto bg-base-100 shadow-2xl md:rounded-2xl overflow-hidden pointer-events-auto"
+          onClick={(e) => e.stopPropagation()}
+          style={{ marginLeft: "auto", marginRight: "auto" }}
         >
-          <X size={24} />
-        </button>
-
-        {/* LEFT - Image Section */}
-        <div className="flex-[1.2] flex flex-col bg-base-200 border-r border-base-300 relative overflow-hidden">
-          {/* Back button Desktop */}
-          <button
-            onClick={onClose}
-            className="absolute top-6 left-6 z-20 btn btn-neutral btn-sm rounded-full gap-2 backdrop-blur-md bg-black/40 border-none text-white hover:bg-black/60 hidden md:flex"
-          >
-            <ChevronLeft size={18} /> Back
-          </button>
-
-          {/* Image Container */}
-          <div className="flex-1 flex items-center justify-center p-4 md:p-12 overflow-hidden">
-            <img
-              src={image.url}
-              alt={title}
-              className="max-w-full max-h-full object-contain rounded-xl shadow-2xl transition-transform duration-500 hover:scale-[1.01]"
-            />
-          </div>
-
-          {/* Action Bar */}
-          <div className="p-4 md:p-6 bg-base-100 border-t border-base-300 flex items-center gap-4">
-            <div className="flex-1 min-w-0">
-              <h2 className="font-bold text-lg truncate text-base-content">{title}</h2>
-              <p className="text-sm text-base-content/60 truncate">by {image.author}</p>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <button onClick={handleShare} className="btn btn-circle btn-ghost btn-sm" title="Share">
-                <Share2 size={20} />
-              </button>
-              
-              <button 
-                onClick={() => toggleFavorite(image)} 
-                className={`btn btn-circle btn-sm ${isFavorite ? "btn-error" : "btn-ghost"}`}
-                title={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+          {/* ── LEFT: Image panel ── */}
+          <div className="flex-[1.2] flex flex-col bg-base-200 border-r border-base-300 relative overflow-hidden min-w-0">
+            {/* Back / Close */}
+            <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
+              <button
+                onClick={onClose}
+                className="btn btn-sm rounded-full gap-1 bg-black/50 hover:bg-black/70 border-none text-white backdrop-blur-sm"
               >
-                <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
-              </button>
-              
-              <button onClick={handleDownload} className="btn btn-primary rounded-full px-6 gap-2 btn-sm md:btn-md">
-                <Download size={18} /> <span className="hidden sm:inline">Download</span>
+                <ChevronLeft size={16} />
+                <span className="hidden sm:inline text-sm">Back</span>
               </button>
             </div>
-          </div>
-        </div>
 
-        {/* RIGHT - Content Section (Tabs) */}
-        <div className="flex-1 flex flex-col bg-base-100 h-full overflow-hidden">
-          {/* Tab Header */}
-          <div className="tabs tabs-bordered w-full grid grid-cols-2 bg-base-100 sticky top-0 z-10">
-            <button 
-              className={`tab tab-lg flex items-center gap-2 transition-all ${activeTab === "related" ? "tab-active font-bold text-primary" : "text-base-content/50"}`}
-              onClick={() => setActiveTab("related")}
+            {/* Close button top-right for mobile */}
+            <button
+              onClick={onClose}
+              className="absolute top-4 right-4 z-20 btn btn-circle btn-sm bg-black/50 hover:bg-black/70 border-none text-white backdrop-blur-sm md:hidden"
             >
-              <ExternalLink size={18} /> More Like This
+              <X size={16} />
             </button>
-            <button 
-              className={`tab tab-lg flex items-center gap-2 transition-all ${activeTab === "chat" ? "tab-active font-bold text-primary" : "text-base-content/50"}`}
-              onClick={() => setActiveTab("chat")}
-            >
-              <MessageCircle size={18} /> Chat
-            </button>
-          </div>
 
-          {/* Tab Content */}
-          <div className="flex-1 overflow-y-auto" ref={scrollContainerRef}>
-            {activeTab === "related" ? (
-              <div className="p-4">
-                {loadingRelated ? (
-                  <div className="flex justify-center items-center py-20">
-                    <span className="loading loading-spinner loading-lg text-primary"></span>
-                  </div>
-                ) : relatedImages.length === 0 ? (
-                  <div className="text-center py-20 opacity-50 italic">No related images found.</div>
-                ) : (
-                  <Masonry breakpointCols={masonryBreaks} className="flex gap-4" columnClassName="bg-clip-padding">
-                    {relatedImages.map((img) => (
-                      <div 
-                        key={img.id} 
-                        className="mb-4 relative group cursor-pointer overflow-hidden rounded-xl border border-base-300 shadow-sm hover:shadow-lg transition-all"
-                        onClick={() => {
-                          onImageSelect?.(img);
-                          scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-                        }}
-                      >
-                        <img src={img.thumb} alt={img.author} className="w-full h-auto group-hover:scale-105 transition-transform duration-500" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
-                          <p className="text-white text-xs font-medium">by {img.author}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </Masonry>
-                )}
+            {/* Image */}
+            <div className="flex-1 flex items-center justify-center p-6 md:p-10 overflow-hidden">
+              <img
+                src={image.url}
+                alt={title}
+                className="max-w-full max-h-full object-contain rounded-xl shadow-xl transition-transform duration-500 hover:scale-[1.01]"
+              />
+            </div>
+
+            {/* Action bar */}
+            <div className="shrink-0 p-4 bg-base-100 border-t border-base-300 flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <h2 className="font-bold text-base truncate text-base-content leading-tight">
+                  {title}
+                </h2>
+                <p className="text-sm text-base-content/50 truncate">
+                  by {image.author || "Unknown"}
+                </p>
               </div>
-            ) : (
-              <div className="flex flex-col h-full bg-base-200/30">
-                {/* Chat Messages */}
-                <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
-                  {chatMessages.length === 0 && (
-                    <div className="text-center py-10">
-                      <div className="bg-primary/10 text-primary p-6 rounded-2xl max-w-xs mx-auto">
-                        <MessageCircle size={32} className="mx-auto mb-2 opacity-50" />
-                        <p className="font-medium text-sm">No messages yet. Be the first to start the conversation!</p>
-                      </div>
-                    </div>
-                  )}
-                  {chatMessages.map((msg, i) => (
-                    <div 
-                      key={msg.id || i} 
-                      className={`chat ${msg.sender?._id === (user?.id || user?._id) ? "chat-end" : "chat-start"}`}
-                    >
-                      <div className="chat-image avatar placeholder">
-                        <div className="bg-neutral text-neutral-content rounded-full w-8">
-                          <span className="text-xs">{msg.sender?.name?.charAt(0).toUpperCase() || "U"}</span>
-                        </div>
-                      </div>
-                      <div className="chat-header opacity-50 text-xs mb-1">
-                        {msg.sender?.name || "User"}
-                      </div>
-                      <div className={`chat-bubble text-sm ${msg.sender?._id === (user?.id || user?._id) ? "chat-bubble-primary" : "chat-bubble-neutral"}`}>
-                        {msg.text}
-                      </div>
-                    </div>
-                  ))}
-                  <div ref={chatEndRef} />
-                </div>
 
-                {/* Chat Input */}
-                <div className="p-4 bg-base-100 border-t border-base-300">
-                  {user ? (
-                    <div className="flex gap-2 items-center">
-                      <input
-                        type="text"
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && sendChat()}
-                        placeholder="Type a message..."
-                        className="input input-bordered input-primary flex-1 rounded-full h-11"
-                      />
-                      <button 
-                        onClick={sendChat} 
-                        disabled={!chatInput.trim()}
-                        className="btn btn-primary btn-circle btn-md shadow-md"
-                      >
-                        <Send size={18} />
-                      </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={handleShare}
+                  className="btn btn-circle btn-ghost btn-sm"
+                  title="Share"
+                >
+                  <Share2 size={18} />
+                </button>
+
+                <button
+                  onClick={() => toggleFavorite(image)}
+                  className={`btn btn-circle btn-sm transition-colors ${
+                    isFavorite
+                      ? "bg-red-500 hover:bg-red-600 border-none text-white"
+                      : "btn-ghost"
+                  }`}
+                  title={
+                    isFavorite ? "Remove from Favorites" : "Add to Favorites"
+                  }
+                >
+                  <Heart
+                    size={18}
+                    fill={isFavorite ? "currentColor" : "none"}
+                  />
+                </button>
+
+                <button
+                  onClick={handleDownload}
+                  className="btn btn-primary rounded-full px-4 gap-2 btn-sm"
+                >
+                  <Download size={16} />
+                  <span className="hidden sm:inline">Download</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* ── RIGHT: Tabs panel ── */}
+          <div className="flex-1 flex flex-col bg-base-100 min-h-0 min-w-0">
+            {/* Tab bar */}
+            <div className="shrink-0 flex border-b border-base-300 bg-base-100">
+              <button
+                className={`flex-1 flex items-center justify-center gap-2 py-4 text-sm font-semibold transition-all border-b-2 ${
+                  activeTab === "related"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-base-content/50 hover:text-base-content"
+                }`}
+                onClick={() => setActiveTab("related")}
+              >
+                <ExternalLink size={16} />
+                More Like This
+              </button>
+              <button
+                className={`flex-1 flex items-center justify-center gap-2 py-4 text-sm font-semibold transition-all border-b-2 ${
+                  activeTab === "chat"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-base-content/50 hover:text-base-content"
+                }`}
+                onClick={() => setActiveTab("chat")}
+              >
+                <MessageCircle size={16} />
+                Chat
+                {chatMessages.length > 0 && (
+                  <span className="badge badge-primary badge-xs">
+                    {chatMessages.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Tab content */}
+            <div className="flex-1 overflow-y-auto" ref={scrollContainerRef}>
+              {/* Related images */}
+              {activeTab === "related" && (
+                <div className="p-4">
+                  {loadingRelated ? (
+                    <div className="flex justify-center items-center py-20">
+                      <span className="loading loading-spinner loading-lg text-primary" />
+                    </div>
+                  ) : relatedImages.length === 0 ? (
+                    <div className="text-center py-20 text-base-content/40 italic">
+                      No related images found.
                     </div>
                   ) : (
-                    <div className="alert bg-base-200 border-none text-sm py-3">
-                      <span>Please login to participate in the chat.</span>
-                    </div>
+                    <Masonry
+                      breakpointCols={masonryBreaks}
+                      className="flex gap-3"
+                      columnClassName="bg-clip-padding flex flex-col gap-3"
+                    >
+                      {relatedImages.map((img) => (
+                        <div
+                          key={img.id}
+                          className="relative group cursor-pointer overflow-hidden rounded-xl border border-base-300 shadow-sm hover:shadow-lg transition-all duration-300"
+                          onClick={() => {
+                            onImageSelect?.(img);
+                            scrollContainerRef.current?.scrollTo({
+                              top: 0,
+                              behavior: "smooth",
+                            });
+                          }}
+                        >
+                          <img
+                            src={img.thumb}
+                            alt={img.author}
+                            className="w-full h-auto group-hover:scale-105 transition-transform duration-500"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
+                            <p className="text-white text-xs font-medium truncate">
+                              by {img.author}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </Masonry>
                   )}
                 </div>
-              </div>
-            )}
+              )}
+
+              {/* Chat */}
+              {activeTab === "chat" && (
+                <div className="flex flex-col h-full">
+                  <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 min-h-[300px]">
+                    {chatMessages.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-16 text-center">
+                        <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                          <MessageCircle
+                            size={28}
+                            className="text-primary opacity-60"
+                          />
+                        </div>
+                        <p className="font-semibold text-base-content/70">
+                          No messages yet
+                        </p>
+                        <p className="text-sm text-base-content/40 mt-1">
+                          Be the first to start the conversation!
+                        </p>
+                      </div>
+                    ) : (
+                      chatMessages.map((msg, i) => {
+                        const own = isOwnMessage(msg);
+                        const senderName =
+                          msg.sender?.name || msg.senderName || "User";
+                        const initial = senderName.charAt(0).toUpperCase();
+
+                        return (
+                          <div
+                            key={msg.id || msg._id || i}
+                            className={`flex gap-2 ${own ? "flex-row-reverse" : "flex-row"}`}
+                          >
+                            {/* Avatar */}
+                            <div
+                              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-1 ${
+                                own
+                                  ? "bg-primary text-primary-content"
+                                  : "bg-base-300 text-base-content"
+                              }`}
+                            >
+                              {initial}
+                            </div>
+
+                            <div
+                              className={`flex flex-col gap-1 max-w-[75%] ${own ? "items-end" : "items-start"}`}
+                            >
+                              <span className="text-xs text-base-content/40 px-1">
+                                {own ? "You" : senderName}
+                              </span>
+                              <div
+                                className={`px-3 py-2 rounded-2xl text-sm leading-relaxed ${
+                                  own
+                                    ? "bg-primary text-primary-content rounded-tr-sm"
+                                    : "bg-base-200 text-base-content rounded-tl-sm"
+                                }`}
+                              >
+                                {msg.text}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  {/* Chat input */}
+                  <div className="shrink-0 p-4 bg-base-100 border-t border-base-300">
+                    {user ? (
+                      <div className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          value={chatInput}
+                          onChange={(e) => setChatInput(e.target.value)}
+                          onKeyDown={handleChatKeyDown}
+                          placeholder="Type a message… (Enter to send)"
+                          className="input input-bordered input-sm flex-1 rounded-full h-10 focus:input-primary transition-all"
+                          maxLength={500}
+                        />
+                        <button
+                          onClick={sendChat}
+                          disabled={!chatInput.trim()}
+                          className="btn btn-primary btn-circle btn-sm disabled:opacity-40"
+                        >
+                          <Send size={15} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3 py-2 px-4 bg-base-200 rounded-full text-sm text-base-content/60">
+                        <MessageCircle size={16} className="shrink-0" />
+                        <span>
+                          <a href="/login" className="link link-primary">
+                            Sign in
+                          </a>{" "}
+                          to join the conversation
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

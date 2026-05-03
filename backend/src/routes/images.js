@@ -62,28 +62,66 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// POST /images → upload file Not In Use
+// GET /images/my-uploads → get images uploaded by the current user
+router.get("/my-uploads", requireAuth, async (req, res, next) => {
+  try {
+    const images = await Image.find({ owner: req.user.id }).sort({ createdAt: -1 });
+    res.json({ items: images });
+  } catch (e) {
+    console.error("Error fetching user uploads:", e);
+    next(e);
+  }
+});
+
+// GET /images/recommendations → get recommended images
+router.get("/recommendations", async (req, res, next) => {
+  try {
+    // Simple recommendation: return 12 random images from DB
+    const count = await Image.countDocuments();
+    const random = Math.floor(Math.random() * Math.max(0, count - 12));
+    const items = await Image.find().skip(random).limit(12);
+    res.json({ items });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /images → upload file
 router.post("/", requireAuth, upload.single("file"), async (req, res, next) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "No file" });
+    console.log("Upload request received");
+    if (!req.file) {
+      console.log("No file in request");
+      return res.status(400).json({ message: "No file provided" });
+    }
 
     const { title = "", tags = "" } = req.body;
+    console.log("Uploading to Cloudinary...", { title, tags });
 
-    const result = await uploadToCloudinary(req.file.buffer, {
-      folder: "wallpaper_app"
-    });
+    let result;
+    try {
+      result = await uploadToCloudinary(req.file.buffer, {
+        folder: "wallpaper_app"
+      });
+      console.log("Cloudinary upload successful:", result.secure_url);
+    } catch (cloudinaryError) {
+      console.error("Cloudinary upload failed:", cloudinaryError);
+      return res.status(500).json({ message: "Cloudinary upload failed", error: cloudinaryError.message });
+    }
 
     const img = await Image.create({
       owner: req.user.id,
       url: result.secure_url,
       publicID: result.public_id,
       Title: title,
-      tags: tags ? tags.split(",").map((s) => s.trim()) : []
+      tags: tags ? tags.split(",").map((s) => s.trim()).filter(t => t !== "") : []
     });
 
+    console.log("Image record created in DB:", img._id);
     res.status(201).json(img);
   } catch (e) {
-    next(e);
+    console.error("Detailed upload error:", e);
+    res.status(500).json({ message: e.message || "Internal server error during upload" });
   }
 });
 
