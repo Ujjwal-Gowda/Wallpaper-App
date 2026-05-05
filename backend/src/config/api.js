@@ -1,5 +1,6 @@
-// src/config/api.js
-const isProduction = import.meta.env.VITE_ENV === 'production' || import.meta.env.MODE === 'production';
+const isProduction =
+  import.meta.env.VITE_ENV === "production" ||
+  import.meta.env.MODE === "production";
 
 const API_BASE_URL = isProduction
   ? "https://wallpaper-app-1-9rq5.onrender.com/api"
@@ -13,6 +14,7 @@ export const API_ENDPOINTS = {
   LOGIN: `${API_BASE_URL}/auth/login`,
   REGISTER: `${API_BASE_URL}/auth/register`,
   LOGOUT: `${API_BASE_URL}/auth/logout`,
+  VERIFY: `${API_BASE_URL}/auth/verify`,
   ME: `${API_BASE_URL}/auth/me`,
 
   PROFILE: `${API_BASE_URL}/profile`,
@@ -30,14 +32,14 @@ export const API_ENDPOINTS = {
   INTERNAL_FAVORITE_ADD: (id) => `${API_BASE_URL}/images/${id}/favorite`,
   INTERNAL_FAVORITE_REMOVE: (id) => `${API_BASE_URL}/images/${id}/favorite`,
 
-  COMMENTS: (id) => `${API_BASE_URL}/comments/${id}`,
-  RELATED: (id) => `${API_BASE_URL}/images/related/${id}`,
+  // Comments (public, all images)
+  COMMENTS: (imageId) => `${API_BASE_URL}/comments/${imageId}`,
 
   HEALTH: isProduction
     ? "https://wallpaper-app-1-9rq5.onrender.com/api/health"
     : "http://localhost:5000/health",
 };
 
-console.log("🚀 API Base URL:", API_BASE_URL);
+console.log(" API Base URL:", API_BASE_URL);
 
 export { API_BASE_URL, SOCKET_URL };

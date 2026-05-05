@@ -9,11 +9,13 @@ import { Server } from "socket.io";
 import { Message } from "./src/models/message.js";
 import { Image } from "./src/models/image.js";
 import { User } from "./src/models/user.js";
+import { Comment } from "./src/models/comment.js";
 import { sendNotificationEmail } from "./src/utils/notifications.js";
 import authRouter from "./src/routes/auth.js";
 import imagesRouter from "./src/routes/images.js";
 import imageRoute from "./src/routes/external.js";
 import profileRoute from "./src/routes/profile.js";
+import commentsRouter from "./src/routes/comments.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,14 +37,12 @@ const allowedOrigins = [
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
-
     if (
       allowedOrigins.includes(origin) ||
       origin.startsWith("http://localhost:")
     ) {
       return callback(null, true);
     }
-
     console.log(" CORS blocked origin:", origin);
     return callback(null, false);
   },
@@ -65,57 +65,42 @@ app.use(
   express.static(path.join(__dirname, "public/images")),
 );
 
-// app.use((req, res, next) => {
-//   console.log(`${req.method} ${req.path} - ${new Date().toISOString()}`);
-//   console.log("Origin:", req.headers.origin);
-//   next();
-// });
-
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 let isConnected = false;
 
 const connectToDatabase = async () => {
-  if (isConnected) {
-    console.log(" Using existing database connection");
-    return;
-  }
-
+  if (isConnected) return;
   try {
-    console.log(" Establishing database connection...");
     await ConnectDB(process.env.MONGO_URL);
     isConnected = true;
-    console.log(" Database connected successfully");
   } catch (error) {
     console.error(" Database connection failed:", error.message);
-    console.log("  Server will continue without database connection");
   }
 };
 
-// Database middleware
 app.use(async (req, res, next) => {
   if (!isConnected) {
     try {
       await connectToDatabase();
     } catch (error) {
-      console.error("Database middleware error:", error.message);
       if (req.path.startsWith("/api/") && !req.path.includes("/health")) {
-        return res.status(503).json({
-          message: "Database temporarily unavailable",
-          retry: true,
-        });
+        return res
+          .status(503)
+          .json({ message: "Database temporarily unavailable", retry: true });
       }
     }
   }
   next();
 });
 
-// API Routes with proper /api prefix
+// all available API Routes
 app.use("/api/images", imagesRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/external", imageRoute);
 app.use("/api/profile", profileRoute);
+app.use("/api/comments", commentsRouter);
 
 app.get("/health", (req, res) => {
   res.json({
@@ -128,7 +113,6 @@ app.get("/health", (req, res) => {
   });
 });
 
-// API info endpoint
 app.get("/api", (req, res) => {
   res.json({
     ok: true,
@@ -139,13 +123,12 @@ app.get("/api", (req, res) => {
       images: "/api/images/*",
       external: "/api/external",
       profile: "/api/profile",
+      comments: "/api/comments/:imageId",
       health: "/health",
     },
-    cors: "enabled",
   });
 });
 
-// Root endpoint for debugging
 app.get("/", (req, res) => {
   res.json({
     ok: true,
@@ -155,92 +138,150 @@ app.get("/", (req, res) => {
   });
 });
 
-// Global error handler
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   if (process.env.NODE_ENV === "production") {
-    res.status(err.status || 500).json({
-      message: "Internal server error",
-    });
+    res.status(err.status || 500).json({ message: "Internal server error" });
   } else {
-    res.status(err.status || 500).json({
-      message: err.message || "Server error",
-      stack: err.stack,
-    });
+    res
+      .status(err.status || 500)
+      .json({ message: err.message || "Server error", stack: err.stack });
   }
 });
 
 const PORT = process.env.PORT || 5000;
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: corsOptions
-});
+const io = new Server(httpServer, { cors: corsOptions });
+
+const userSockets = new Map();
 
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
 
+  socket.on("register_user", (userId) => {
+    if (!userId) return;
+    socket.userId = userId;
+    if (!userSockets.has(userId)) {
+      userSockets.set(userId, new Set());
+    }
+    userSockets.get(userId).add(socket.id);
+    console.log(`User ${userId} registered socket ${socket.id}`);
+  });
+
+  // private chat
   socket.on("join_room", (imageId) => {
-    socket.join(imageId);
-    console.log(`User ${socket.id} joined room ${imageId}`);
-    
-    // Send existing messages
-    Message.find({ imageId })
-      .sort({ createdAt: 1 })
-      .populate("sender", "name email")
-      .then(messages => {
-        socket.emit("chat_history", messages);
-      })
-      .catch(err => console.error("Error fetching chat history:", err));
+    socket.join(`private_${imageId}`);
+    console.log(`Socket ${socket.id} joined private room ${imageId}`);
+
+    // chat history
+    if (imageId.length === 24) {
+      Message.find({ imageId })
+        .sort({ createdAt: 1 })
+        .populate("sender", "name email")
+        .then((messages) => {
+          socket.emit("chat_history", messages);
+        })
+        .catch((err) => console.error("Error fetching chat history:", err));
+    }
   });
 
   socket.on("send_message", async (data) => {
     const { imageId, senderId, text } = data;
-    try {
-      const message = await Message.create({
-        imageId,
-        sender: senderId,
-        text
-      });
-      
-      const populatedMessage = await message.populate("sender", "name email");
-      io.to(imageId).emit("receive_message", populatedMessage);
 
-      // Notification Logic
-      // Check if image is local (uploaded by user)
-      if (imageId.length === 24) { // Assuming MongoDB ObjectId length
-        const image = await Image.findById(imageId).populate("owner");
-        if (image && image.owner && String(image.owner._id) !== String(senderId)) {
-          const sender = await User.findById(senderId);
-          await sendNotificationEmail(
-            image.owner.email,
-            image.Title || "Wallpaper",
-            sender ? sender.name : "A user"
-          );
+    if (!imageId || imageId.length !== 24) {
+      socket.emit("chat_error", {
+        message: "Private chat only available for uploaded images",
+      });
+      return;
+    }
+
+    try {
+      const message = await Message.create({ imageId, sender: senderId, text });
+      const populatedMessage = await message.populate("sender", "name email");
+
+      io.to(`private_${imageId}`).emit("receive_message", populatedMessage);
+
+      const image = await Image.findById(imageId).populate("owner");
+      if (
+        image &&
+        image.owner &&
+        String(image.owner._id) !== String(senderId)
+      ) {
+        const ownerId = String(image.owner._id);
+        const sender = await User.findById(senderId);
+        const senderName = sender ? sender.name : "A user";
+
+        const ownerSockets = userSockets.get(ownerId);
+        if (ownerSockets && ownerSockets.size > 0) {
+          ownerSockets.forEach((socketId) => {
+            io.to(socketId).emit("new_message_notification", {
+              imageId,
+              imageTitle: image.Title || "your wallpaper",
+              senderName,
+              text: text.slice(0, 60),
+            });
+          });
         }
+
+        // Email notification
+        await sendNotificationEmail(
+          image.owner.email,
+          image.Title || "Wallpaper",
+          senderName,
+        );
       }
     } catch (err) {
       console.error("Error saving message:", err);
     }
   });
 
+  // public comments
+  socket.on("join_comments", (imageId) => {
+    socket.join(`comments_${imageId}`);
+    console.log(`Socket ${socket.id} joined comments room ${imageId}`);
+
+    Comment.find({ imageId })
+      .sort({ createdAt: 1 })
+      .populate("sender", "name email")
+      .then((comments) => {
+        socket.emit("comments_history", comments);
+      })
+      .catch((err) => console.error("Error fetching comments history:", err));
+  });
+
+  socket.on("send_comment", async (data) => {
+    const { imageId, senderId, text } = data;
+
+    try {
+      const comment = await Comment.create({ imageId, sender: senderId, text });
+      const populatedComment = await comment.populate("sender", "name email");
+
+      io.to(`comments_${imageId}`).emit("receive_comment", populatedComment);
+    } catch (err) {
+      console.error("Error saving comment:", err);
+    }
+  });
+
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
+    if (socket.userId) {
+      const sockets = userSockets.get(socket.userId);
+      if (sockets) {
+        sockets.delete(socket.id);
+        if (sockets.size === 0) userSockets.delete(socket.userId);
+      }
+    }
   });
 });
 
-// Start server and attempt database connection
 httpServer.listen(PORT, () => {
   console.log(` Server running on port ${PORT}`);
   console.log(` Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(` Health check: http://localhost:${PORT}/health`);
-  console.log(` API: http://localhost:${PORT}/api`);
 
-  // Attempt database connection after server starts
   connectToDatabase().catch((err) => {
     console.error("Initial database connection failed:", err.message);
-    console.log(" Will retry on first API request...");
   });
 });
 
 export default app;
-

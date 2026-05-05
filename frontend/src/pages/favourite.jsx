@@ -141,7 +141,7 @@ export default function Favourite() {
       <NotificationToast notifications={notifications} onRemove={removeNotif} />
 
       <header className="mb-10 text-center">
-        <h1 className="text-4xl font-black mb-2 bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+        <h1 className="text-4xl font-black mb-2 bg-gradient-to-r from-primary to-secondary bg-clip-text ">
           My Favorites
         </h1>
         <p className="text-base-content/60">

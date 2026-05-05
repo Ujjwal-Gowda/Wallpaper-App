@@ -19,6 +19,7 @@ import { ThemeProvider } from "./context/ThemeContext.jsx";
 import { SearchProvider } from "./context/SearchContext.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import { NotificationProvider } from "./context/NotificationContext.jsx";
+import { SocketProvider } from "./context/SocketContext.jsx";
 
 function Layout() {
   const location = useLocation();
@@ -88,9 +89,11 @@ export default function App() {
       <AuthProvider>
         <SearchProvider>
           <NotificationProvider>
-            <Router>
-              <Layout />
-            </Router>
+            <SocketProvider>
+              <Router>
+                <Layout />
+              </Router>
+            </SocketProvider>
           </NotificationProvider>
         </SearchProvider>
       </AuthProvider>

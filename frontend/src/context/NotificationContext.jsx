@@ -6,6 +6,7 @@ import React, {
   useEffect,
 } from "react";
 import { CheckCircle, X, AlertTriangle, Info, Bell } from "lucide-react";
+import { useTheme } from "./ThemeContext.jsx";
 
 const NotificationContext = createContext(null);
 
@@ -146,7 +147,20 @@ function Toast({ toast, onRemove }) {
 // ─── Notification Bell (for sidebar / header) ─────────────────────────────────
 export function NotificationBell() {
   const { notifications, markAllRead, clearAll, unread } = useNotifications();
+  const { theme } = useTheme();
   const [open, setOpen] = useState(false);
+
+  const isDark =
+    theme === "dark" ||
+    theme === "synthwave" ||
+    theme === "night" ||
+    theme === "dracula" ||
+    theme === "halloween" ||
+    theme === "forest" ||
+    theme === "black" ||
+    theme === "luxury" ||
+    theme === "coffee" ||
+    theme === "business";
 
   useEffect(() => {
     if (open) markAllRead();
@@ -173,13 +187,24 @@ export function NotificationBell() {
             className="fixed inset-0 z-[9990]"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute right-0 top-12 z-[9991] w-80 rounded-2xl shadow-2xl border border-base-300 bg-base-100 overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-base-300">
-              <h3 className="font-bold text-base-content">Notifications</h3>
+          <div
+            className={`absolute left-full bottom-0 ml-4 z-[9991] w-80 rounded-2xl shadow-2xl border border-base-300 overflow-hidden animate-in fade-in slide-in-from-left-5 duration-200 ${
+              isDark ? "bg-[#0a0a0a] text-white" : "bg-gray-200 text-gray-900"
+            }`}
+          >
+            <div
+              className={`flex items-center justify-between px-4 py-3 border-b border-base-300 ${
+                isDark ? "bg-white/5" : "bg-black/5"
+              }`}
+            >
+              <h3 className="font-bold">Notifications</h3>
               {notifications.length > 0 && (
                 <button
-                  className="text-xs text-base-content/50 hover:text-base-content transition-colors"
-                  onClick={clearAll}
+                  className="text-xs text-secondary hover:text-secondary-focus transition-colors font-semibold"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearAll();
+                  }}
                 >
                   Clear all
                 </button>
@@ -188,22 +213,20 @@ export function NotificationBell() {
 
             <div className="max-h-80 overflow-y-auto">
               {notifications.length === 0 ? (
-                <div className="text-center py-10 text-base-content/40">
-                  <Bell size={28} className="mx-auto mb-2 opacity-40" />
+                <div className="text-center py-10 opacity-40">
+                  <Bell size={28} className="mx-auto mb-2 opacity-20" />
                   <p className="text-sm">No notifications yet</p>
                 </div>
               ) : (
                 notifications.map((n) => (
                   <div
                     key={n.id}
-                    className={`px-4 py-3 border-b border-base-300/50 transition-colors hover:bg-base-200 ${
-                      !n.read ? "bg-primary/5" : ""
-                    }`}
+                    className={`px-4 py-3 border-b border-base-300/50 transition-colors ${
+                      isDark ? "hover:bg-white/10" : "hover:bg-black/10"
+                    } ${!n.read ? (isDark ? "bg-primary/20" : "bg-primary/10") : ""}`}
                   >
-                    <p className="text-sm text-base-content leading-snug">
-                      {n.msg}
-                    </p>
-                    <p className="text-xs text-base-content/40 mt-1">
+                    <p className="text-sm leading-snug font-medium">{n.msg}</p>
+                    <p className="text-[10px] uppercase tracking-wider opacity-40 mt-1.5 font-bold">
                       {n.time.toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",

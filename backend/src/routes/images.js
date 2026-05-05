@@ -87,6 +87,30 @@ router.get("/recommendations", async (req, res, next) => {
   }
 });
 
+router.get("/related/:id", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const currentImage = await Image.findById(id);
+    if (!currentImage) {
+      return res.status(404).json({ message: "Image not found" });
+    }
+
+    // Find images with similar titles (case-insensitive)
+    //  split the title into words and search for any of those words
+    const words = currentImage.Title.split(/\s+/).filter((w) => w.length > 2);
+    let query = { _id: { $ne: id } };
+
+    if (words.length > 0) {
+      query.$or = words.map((word) => ({ Title: new RegExp(word, "i") }));
+    }
+
+    const related = await Image.find(query).limit(10);
+    res.json({ items: related });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // POST /images → upload file
 router.post("/", requireAuth, upload.single("file"), async (req, res, next) => {
   try {
@@ -403,4 +427,3 @@ router.delete("/:id/favorite", requireAuth, async (req, res, next) => {
 });
 
 export default router;
-

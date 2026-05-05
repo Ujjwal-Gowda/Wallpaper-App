@@ -291,7 +291,7 @@ router.get("/", async (req, res, next) => {
     const shouldUseUnsplash = useUnsplash === "true";
     const baseUrl = getBaseUrl(req);
 
-    // ── User-uploaded (DB) images ──────────────────────────────────────────
+    // User-uploaded (DB) images
     const dbFilter = query
       ? {
           $or: [
@@ -307,7 +307,7 @@ router.get("/", async (req, res, next) => {
 
     const formattedDbImages = mapDbImages(dbImages);
 
-    // ── Static local images ────────────────────────────────────────────────
+    // Static local images
     let filteredStatic = mapLocalImages(defaultImages, baseUrl);
 
     if (query) {
@@ -322,7 +322,7 @@ router.get("/", async (req, res, next) => {
         .map(({ _score, ...img }) => img);
     }
 
-    // ── No query: homepage recommendations ────────────────────────────────
+    // No query: homepage recommendations
     if (!query) {
       let items = [...formattedDbImages, ...filteredStatic];
       let total_pages = Math.ceil(items.length / perPageNum);
@@ -349,7 +349,7 @@ router.get("/", async (req, res, next) => {
             tags: x.tags?.map((t) => t.title) || [],
           }));
 
-          // Interleave: DB uploads first, then unsplash
+          //  DB uploads first, then unsplash
           const dbSlice = formattedDbImages.slice(
             0,
             Math.min(5, formattedDbImages.length),
@@ -368,7 +368,7 @@ router.get("/", async (req, res, next) => {
       return res.json({ items, total_pages });
     }
 
-    // ── Query provided: search Unsplash + local ────────────────────────────
+    // Query provided
     const allLocalMatches = [...formattedDbImages, ...filteredStatic];
 
     if (!UNSPLASH_KEY || !shouldUseUnsplash) {
@@ -546,6 +546,7 @@ router.get("/:id", async (req, res, next) => {
           });
         }
       } catch (e) {
+        return res.status(400).json({ message: "not valid ObjectId" });
         // Not a valid ObjectId
       }
     }
@@ -576,4 +577,3 @@ router.get("/:id", async (req, res, next) => {
 });
 
 export default router;
-

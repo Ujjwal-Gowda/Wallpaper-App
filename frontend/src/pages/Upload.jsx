@@ -188,12 +188,8 @@ export default function UploadPage() {
         {/* Header */}
         <div className="text-center space-y-3">
           <h1 className="text-4xl font-bold text-base-content tracking-tight">
-            Share Your <span className="text-primary">Masterpiece</span>
+            Upload Images
           </h1>
-          <p className="text-base-content/60 max-w-2xl mx-auto">
-            Upload your favorite wallpapers and share them with the community.
-            PNG, JPG or JPEG up to 5MB.
-          </p>
         </div>
 
         {/* Upload Form */}
