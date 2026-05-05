@@ -1,23 +1,109 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import Masonry from "react-masonry-css";
-import { Heart, Search, Loader2, X } from "lucide-react";
+import {
+  Heart,
+  Search,
+  Loader2,
+  Bell,
+  X,
+  CheckCircle,
+  Info,
+  AlertTriangle,
+} from "lucide-react";
 import axios from "axios";
 import { API_ENDPOINTS } from "../config/api.js";
 import ImageModal from "./ImageModal.jsx";
 import { useSearch } from "../context/SearchContext.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 
+// ─── Global Notification System ───────────────────────────────────────────────
+let globalNotifyFn = null;
+
+export function notify(msg, type = "info") {
+  if (globalNotifyFn) globalNotifyFn(msg, type);
+}
+
+function NotificationToast({ notifications, onRemove }) {
+  return (
+    <div className="fixed top-4 right-4 z-[10001] flex flex-col gap-2 pointer-events-none">
+      {notifications.map((n) => (
+        <div
+          key={n.id}
+          className="flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium max-w-xs pointer-events-auto"
+          style={{
+            animation: "slideInRight 0.3s cubic-bezier(.22,.68,0,1.2)",
+            backdropFilter: "blur(12px)",
+            border: "1px solid rgba(255,255,255,0.12)",
+            background:
+              n.type === "success"
+                ? "linear-gradient(135deg,#22c55e,#16a34a)"
+                : n.type === "error"
+                  ? "linear-gradient(135deg,#ef4444,#dc2626)"
+                  : n.type === "warning"
+                    ? "linear-gradient(135deg,#f59e0b,#d97706)"
+                    : "linear-gradient(135deg,#3b82f6,#1d4ed8)",
+            color: "#fff",
+          }}
+        >
+          {n.type === "success" && (
+            <CheckCircle size={16} className="shrink-0" />
+          )}
+          {n.type === "error" && <X size={16} className="shrink-0" />}
+          {n.type === "warning" && (
+            <AlertTriangle size={16} className="shrink-0" />
+          )}
+          {n.type === "info" && <Info size={16} className="shrink-0" />}
+          <span className="flex-1">{n.msg}</span>
+          <button
+            onClick={() => onRemove(n.id)}
+            className="opacity-60 hover:opacity-100 transition-opacity ml-1"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ))}
+      <style>{`
+        @keyframes slideInRight {
+          from { opacity: 0; transform: translateX(60px) scale(0.95); }
+          to   { opacity: 1; transform: translateX(0) scale(1); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ─── Main Component ────────────────────────────────────────────────────────────
 export default function MasonryGrid() {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const { query, setQuery, searchText, setSearchText, clearSearch } =
-    useSearch();
+  const { query, setQuery, searchText, setSearchText } = useSearch();
+  const { theme } = useTheme();
   const [favoriteStatus, setFavoriteStatus] = useState({});
   const [isMobile, setIsMobile] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
   const [useUnsplash, setUseUnsplash] = useState(import.meta.env.PROD);
+  const [notifications, setNotifications] = useState([]);
+
+  // Register global notify
+  useEffect(() => {
+    globalNotifyFn = (msg, type) => {
+      const id = Date.now() + Math.random();
+      setNotifications((prev) => [...prev, { id, msg, type }]);
+      setTimeout(() => {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+      }, 4000);
+    };
+    return () => {
+      globalNotifyFn = null;
+    };
+  }, []);
+
+  const removeNotification = (id) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  };
 
   const observer = useRef();
   const lastImageRef = useCallback(
@@ -34,7 +120,6 @@ export default function MasonryGrid() {
     [loading, loadingMore, hasMore],
   );
 
-  // Detect mobile device
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(
@@ -44,25 +129,21 @@ export default function MasonryGrid() {
           ),
       );
     };
-
     checkMobile();
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  // Reset when query changes
   useEffect(() => {
     setImages([]);
     setPage(1);
     setHasMore(true);
   }, [query]);
 
-  // Fetch when page, query or useUnsplash changes
   useEffect(() => {
     fetchImages(query, page);
   }, [query, page, useUnsplash]);
 
-  // Fetch images from backend API
   async function fetchImages(q, p) {
     try {
       if (p === 1) setLoading(true);
@@ -72,18 +153,13 @@ export default function MasonryGrid() {
         `${API_ENDPOINTS.EXTERNAL_IMAGES}?query=${encodeURIComponent(q)}&page=${p}&per_page=20&useUnsplash=${useUnsplash}`,
       );
 
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
 
       const data = await res.json();
       const newItems = data.items || [];
 
-      if (newItems.length === 0) {
-        setHasMore(false);
-      }
+      if (newItems.length === 0) setHasMore(false);
 
-      // merge old + new
       setImages((prev) => {
         if (p === 1) return newItems;
         const seen = new Set(prev.map((img) => img.id));
@@ -91,7 +167,6 @@ export default function MasonryGrid() {
         return [...prev, ...filteredNew];
       });
 
-      // Check favorite status for each image (if user is logged in)
       const token = localStorage.getItem("token");
       if (token && newItems.length > 0) {
         checkFavoriteStatus(newItems);
@@ -105,7 +180,6 @@ export default function MasonryGrid() {
     }
   }
 
-  // Check which images are favorited
   async function checkFavoriteStatus(imageList) {
     try {
       const token = localStorage.getItem("token");
@@ -113,29 +187,27 @@ export default function MasonryGrid() {
 
       const statusPromises = imageList.map(async (img) => {
         try {
-          if (img.id.startsWith("local") || img.type === "local") {
+          if (img.id?.toString().startsWith("local") || img.type === "local") {
             return { id: img.id, isFavorite: false };
           }
-
           const res = await axios.get(
             API_ENDPOINTS.EXTERNAL_FAVORITE_CHECK(img.id),
-            {
-              headers: { Authorization: `Bearer ${token}` },
-              timeout: 5000,
-            },
+            { headers: { Authorization: `Bearer ${token}` }, timeout: 5000 },
           );
           return { id: img.id, isFavorite: res.data.isFavorite };
-        } catch (err) {
+        } catch {
           return { id: img.id, isFavorite: false };
         }
       });
 
       const statusResults = await Promise.all(statusPromises);
-      const statusMap = { ...favoriteStatus };
-      statusResults.forEach(({ id, isFavorite }) => {
-        statusMap[id] = isFavorite;
+      setFavoriteStatus((prev) => {
+        const statusMap = { ...prev };
+        statusResults.forEach(({ id, isFavorite }) => {
+          statusMap[id] = isFavorite;
+        });
+        return statusMap;
       });
-      setFavoriteStatus(statusMap);
     } catch (err) {
       console.error("Error checking favorite status:", err);
     }
@@ -145,7 +217,7 @@ export default function MasonryGrid() {
     try {
       const token = localStorage.getItem("token");
       if (!token) {
-        alert("Please login to add favorites");
+        globalNotifyFn?.("Please login to add favorites", "warning");
         return;
       }
 
@@ -156,6 +228,7 @@ export default function MasonryGrid() {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 10000,
         });
+        globalNotifyFn?.("💔 Removed from favorites", "info");
       } else {
         await axios.post(
           API_ENDPOINTS.EXTERNAL_FAVORITE,
@@ -164,39 +237,48 @@ export default function MasonryGrid() {
             url: img.url,
             thumb: img.thumb,
             author: img.author,
-            title: img.description || `Image by ${img.author}`,
+            title: img.description || img.Title || `Image by ${img.author}`,
           },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            timeout: 10000,
-          },
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 },
         );
+        globalNotifyFn?.("❤️ Added to favorites!", "success");
       }
 
-      setFavoriteStatus((prev) => ({
-        ...prev,
-        [img.id]: !isFavorite,
-      }));
+      setFavoriteStatus((prev) => ({ ...prev, [img.id]: !isFavorite }));
     } catch (err) {
       console.error("Error toggling favorite:", err);
+      globalNotifyFn?.("Failed to update favorites", "error");
     }
   };
 
-  const breakpointColumnsObj = {
-    default: 4,
-    1100: 3,
-    700: 2,
-    500: 1,
-  };
+  const breakpointColumnsObj = { default: 4, 1100: 3, 700: 2, 500: 1 };
 
   const handleSearch = (e) => {
     if (e) e.preventDefault();
     setQuery(searchText);
   };
 
+  const isDark =
+    theme === "dark" ||
+    theme === "synthwave" ||
+    theme === "night" ||
+    theme === "dracula" ||
+    theme === "halloween" ||
+    theme === "forest" ||
+    theme === "black" ||
+    theme === "luxury" ||
+    theme === "coffee" ||
+    theme === "business";
+
   return (
     <div className="p-4 ml-20 bg-base-100 min-h-screen">
-      {/* Search Bar & Home Button */}
+      {/* Global notifications */}
+      <NotificationToast
+        notifications={notifications}
+        onRemove={removeNotification}
+      />
+
+      {/* Search Bar */}
       <div className="flex flex-col items-center mb-12 mt-6">
         <form onSubmit={handleSearch} className="flex justify-center w-full">
           <div className="relative w-full max-w-2xl group">
@@ -204,7 +286,7 @@ export default function MasonryGrid() {
               type="text"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              placeholder="Search high-quality wallpapers..."
+              placeholder="Search wallpapers by name, style, tag…"
               className="input input-bordered w-full pl-12 h-14 rounded-2xl shadow-sm focus:shadow-md transition-all duration-300 bg-base-100 text-base-content"
             />
             <Search
@@ -223,7 +305,7 @@ export default function MasonryGrid() {
         <div className="mt-4 flex flex-col items-center gap-4">
           <div className="flex items-center gap-3 bg-base-200 p-2 px-4 rounded-full shadow-inner">
             <span className="text-xs font-bold uppercase tracking-wider text-base-content/60">
-              Unsplash API
+              Unsplash
             </span>
             <input
               type="checkbox"
@@ -243,16 +325,25 @@ export default function MasonryGrid() {
           </div>
 
           {query && (
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <h2 className="text-2xl font-bold text-base-content">
                 Results for <span className="text-primary">"{query}"</span>
               </h2>
+              <button
+                onClick={() => {
+                  setQuery("");
+                  setSearchText("");
+                }}
+                className="btn btn-ghost btn-circle btn-sm"
+              >
+                <X size={16} />
+              </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Masonry Grid */}
+      {/* Grid */}
       {loading && images.length === 0 ? (
         <div className="flex flex-col justify-center items-center h-64 gap-4">
           <span className="loading loading-spinner loading-lg text-primary"></span>
@@ -280,6 +371,8 @@ export default function MasonryGrid() {
             {images.map((img, index) => {
               const isFavorite = favoriteStatus[img.id] || false;
               const isLastElement = images.length === index + 1;
+              const isLocal =
+                img.id?.toString().startsWith("local") || img.type === "local";
 
               return (
                 <div
@@ -291,7 +384,7 @@ export default function MasonryGrid() {
                   <div className="overflow-hidden rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 border border-base-300 bg-base-200">
                     <img
                       src={img.thumb}
-                      alt={img.author}
+                      alt={img.author || img.Title || "wallpaper"}
                       className="w-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out min-h-[100px]"
                       loading="lazy"
                     />
@@ -305,12 +398,11 @@ export default function MasonryGrid() {
                       toggleFavorite(img);
                     }}
                     className={`absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 
-                    ${isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100"}
-                    ${isFavorite ? "bg-red-500 text-white" : "bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"}
-`}
+                      ${isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100"}
+                      ${isFavorite ? "bg-red-500 text-white" : "bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"}`}
                   >
                     <Heart
-                      size={isMobile ? 20 : 24}
+                      size={isMobile ? 20 : 16}
                       fill={isFavorite ? "currentColor" : "none"}
                     />
                   </button>
@@ -324,12 +416,13 @@ export default function MasonryGrid() {
                     }`}
                   >
                     <p className="text-sm font-semibold truncate">
-                      by {img.author}
+                      {img.Title || img.description || `by ${img.author}`}
                     </p>
                   </div>
 
-                  {(img.id.startsWith("local") || img.type === "local") && (
-                    <div className="absolute top-3 left-3 badge badge-primary font-bold">
+                  {/* Local badge */}
+                  {isLocal && (
+                    <div className="absolute top-3 left-3 badge badge-primary font-bold text-xs shadow">
                       Local
                     </div>
                   )}

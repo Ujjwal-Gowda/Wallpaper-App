@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { v2 as cloudinary } from "cloudinary";
-import { Image } from "../models/image.js"
+import { Image } from "../models/image.js";
 import { User } from "../models/user.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import mongoose from "mongoose";
@@ -9,19 +9,19 @@ import mongoose from "mongoose";
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, 
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
       cb(new Error("Only image files are allowed"), false);
     }
-  }
+  },
 });
 
 const router = Router();
@@ -44,8 +44,8 @@ router.get("/", async (req, res, next) => {
       ? {
           $or: [
             { Title: new RegExp(search, "i") },
-            { tags: new RegExp(search, "i") }
-          ]
+            { tags: new RegExp(search, "i") },
+          ],
         }
       : {};
 
@@ -62,10 +62,12 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// GET /images/my-uploads → get images uploaded by the current user
+// user uploads
 router.get("/my-uploads", requireAuth, async (req, res, next) => {
   try {
-    const images = await Image.find({ owner: req.user.id }).sort({ createdAt: -1 });
+    const images = await Image.find({ owner: req.user.id }).sort({
+      createdAt: -1,
+    });
     res.json({ items: images });
   } catch (e) {
     console.error("Error fetching user uploads:", e);
@@ -73,10 +75,9 @@ router.get("/my-uploads", requireAuth, async (req, res, next) => {
   }
 });
 
-// GET /images/recommendations → get recommended images
 router.get("/recommendations", async (req, res, next) => {
   try {
-    // Simple recommendation: return 12 random images from DB
+    // 12 random images from DB
     const count = await Image.countDocuments();
     const random = Math.floor(Math.random() * Math.max(0, count - 12));
     const items = await Image.find().skip(random).limit(12);
@@ -101,12 +102,15 @@ router.post("/", requireAuth, upload.single("file"), async (req, res, next) => {
     let result;
     try {
       result = await uploadToCloudinary(req.file.buffer, {
-        folder: "wallpaper_app"
+        folder: "wallpaper_app",
       });
       console.log("Cloudinary upload successful:", result.secure_url);
     } catch (cloudinaryError) {
       console.error("Cloudinary upload failed:", cloudinaryError);
-      return res.status(500).json({ message: "Cloudinary upload failed", error: cloudinaryError.message });
+      return res.status(500).json({
+        message: "Cloudinary upload failed",
+        error: cloudinaryError.message,
+      });
     }
 
     const img = await Image.create({
@@ -114,34 +118,40 @@ router.post("/", requireAuth, upload.single("file"), async (req, res, next) => {
       url: result.secure_url,
       publicID: result.public_id,
       Title: title,
-      tags: tags ? tags.split(",").map((s) => s.trim()).filter(t => t !== "") : []
+      tags: tags
+        ? tags
+            .split(",")
+            .map((s) => s.trim())
+            .filter((t) => t !== "")
+        : [],
     });
 
     console.log("Image record created in DB:", img._id);
     res.status(201).json(img);
   } catch (e) {
     console.error("Detailed upload error:", e);
-    res.status(500).json({ message: e.message || "Internal server error during upload" });
+    res
+      .status(500)
+      .json({ message: e.message || "Internal server error during upload" });
   }
 });
 
-// GET /images/favorites → get user's favorite images (internal only)
+//  get user's favorite images (internal only)
 router.get("/favorites", requireAuth, async (req, res, next) => {
   try {
     console.log("Getting favorites for user ID:", req.user.id);
-    
-    // Validate user ID format
+
     if (!mongoose.Types.ObjectId.isValid(req.user.id)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
 
-    const user = await User.findById(req.user.id).populate('favorites');
-    
+    const user = await User.findById(req.user.id).populate("favorites");
+
     if (!user) {
       console.log("User not found with ID:", req.user.id);
       return res.status(404).json({ message: "User not found" });
     }
-    
+
     res.json({ items: user.favorites || [] });
   } catch (e) {
     console.error("Error in favorites route:", e);
@@ -150,51 +160,55 @@ router.get("/favorites", requireAuth, async (req, res, next) => {
 });
 
 // GET /images/external/:externalId/is-favorite → check if external image is favorited
-router.get("/external/:externalId/is-favorite", requireAuth, async (req, res, next) => {
-  try {
-    console.log("Checking favorite status for:", req.params.externalId);
-    console.log("User ID:", req.user.id);
-    
-    // Validate user ID format
-    if (!mongoose.Types.ObjectId.isValid(req.user.id)) {
-      return res.status(400).json({ message: "Invalid user ID" });
-    }
-    
-    const user = await User.findById(req.user.id);
-    
-    if (!user) {
-      console.log("User not found with ID:", req.user.id);
-      return res.status(404).json({ message: "User not found" });
-    }
+router.get(
+  "/external/:externalId/is-favorite",
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      console.log("Checking favorite status for:", req.params.externalId);
+      console.log("User ID:", req.user.id);
 
-    // Handle case where externalFavorites might not exist yet
-    const externalFavorites = user.externalFavorites || [];
-    const isFavorite = externalFavorites.some(fav => 
-      fav.externalId === req.params.externalId
-    );
-    
-    console.log("External favorites count:", externalFavorites.length);
-    console.log("Is favorite:", isFavorite);
-    res.json({ isFavorite });
-  } catch (e) {
-    console.error("Error in is-favorite route:", e);
-    next(e);
-  }
-});
+      // Validate user ID format
+      if (!mongoose.Types.ObjectId.isValid(req.user.id)) {
+        return res.status(400).json({ message: "Invalid user ID" });
+      }
+
+      const user = await User.findById(req.user.id);
+
+      if (!user) {
+        console.log("User not found with ID:", req.user.id);
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Handle case where externalFavorites might not exist yet
+      const externalFavorites = user.externalFavorites || [];
+      const isFavorite = externalFavorites.some(
+        (fav) => fav.externalId === req.params.externalId,
+      );
+
+      console.log("External favorites count:", externalFavorites.length);
+      console.log("Is favorite:", isFavorite);
+      res.json({ isFavorite });
+    } catch (e) {
+      console.error("Error in is-favorite route:", e);
+      next(e);
+    }
+  },
+);
 
 // POST /images/external-favorite → add external image to favorites
 router.post("/external-favorite", requireAuth, async (req, res, next) => {
   try {
     console.log("Adding external favorite:", req.body);
     console.log("User ID:", req.user.id);
-    
+
     // Validate user ID format
     if (!mongoose.Types.ObjectId.isValid(req.user.id)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
-    
+
     const { externalId, url, thumb, author, title = "" } = req.body;
-    
+
     if (!externalId || !url) {
       return res.status(400).json({ message: "Missing required fields" });
     }
@@ -211,24 +225,25 @@ router.post("/external-favorite", requireAuth, async (req, res, next) => {
       thumb,
       author,
       title: title || `Image by ${author}`,
-      source: 'unsplash',
-      dateAdded: new Date()
+      source: "unsplash",
+      dateAdded: new Date(),
     };
 
     console.log("Favorite data:", favoriteData);
 
     // Initialize externalFavorites array if it doesn't exist
-    const updateQuery = existingUser.externalFavorites 
+    const updateQuery = existingUser.externalFavorites
       ? { $addToSet: { externalFavorites: favoriteData } }
       : { $set: { externalFavorites: [favoriteData] } };
 
-    const updatedUser = await User.findByIdAndUpdate(
-      req.user.id,
-      updateQuery,
-      { new: true }
-    );
+    const updatedUser = await User.findByIdAndUpdate(req.user.id, updateQuery, {
+      new: true,
+    });
 
-    console.log("Updated user external favorites:", updatedUser?.externalFavorites);
+    console.log(
+      "Updated user external favorites:",
+      updatedUser?.externalFavorites,
+    );
     res.json({ ok: true });
   } catch (e) {
     console.error("Error in external-favorite route:", e);
@@ -237,75 +252,85 @@ router.post("/external-favorite", requireAuth, async (req, res, next) => {
 });
 
 // DELETE /images/external/:externalId/favorite → remove external favorite
-router.delete("/external/:externalId/favorite", requireAuth, async (req, res, next) => {
-  try {
-    console.log("Removing external favorite:", req.params.externalId);
-    console.log("User ID:", req.user.id);
-    
-    // Validate user ID format
-    if (!mongoose.Types.ObjectId.isValid(req.user.id)) {
-      return res.status(400).json({ message: "Invalid user ID" });
-    }
+router.delete(
+  "/external/:externalId/favorite",
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      console.log("Removing external favorite:", req.params.externalId);
+      console.log("User ID:", req.user.id);
 
-    const user = await User.findById(req.user.id);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-    
-    const updatedUser = await User.findByIdAndUpdate(
-      req.user.id,
-      { $pull: { externalFavorites: { externalId: req.params.externalId } } },
-      { new: true }
-    );
+      // Validate user ID format
+      if (!mongoose.Types.ObjectId.isValid(req.user.id)) {
+        return res.status(400).json({ message: "Invalid user ID" });
+      }
 
-    console.log("Updated user external favorites:", updatedUser?.externalFavorites);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error("Error in remove external favorite route:", e);
-    next(e);
-  }
-});
+      const user = await User.findById(req.user.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const updatedUser = await User.findByIdAndUpdate(
+        req.user.id,
+        { $pull: { externalFavorites: { externalId: req.params.externalId } } },
+        { new: true },
+      );
+
+      console.log(
+        "Updated user external favorites:",
+        updatedUser?.externalFavorites,
+      );
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("Error in remove external favorite route:", e);
+      next(e);
+    }
+  },
+);
 
 // GET /images/all-favorites → get both internal and external favorites
 router.get("/all-favorites", requireAuth, async (req, res, next) => {
   try {
     console.log("Fetching all favorites for user:", req.user.id);
-    
+
     // Validate user ID format
     if (!mongoose.Types.ObjectId.isValid(req.user.id)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
-    
-    const user = await User.findById(req.user.id).populate('favorites');
-    
+
+    const user = await User.findById(req.user.id).populate("favorites");
+
     if (!user) {
       console.log("User not found with ID:", req.user.id);
       return res.status(404).json({ message: "User not found" });
     }
-    
+
     console.log("User found:", !!user);
     console.log("Internal favorites count:", user?.favorites?.length || 0);
-    console.log("External favorites count:", user?.externalFavorites?.length || 0);
-    
+    console.log(
+      "External favorites count:",
+      user?.externalFavorites?.length || 0,
+    );
+
     // Internal favorites (from database)
-    const internalFavorites = (user.favorites || []).map(fav => ({
+    const internalFavorites = (user.favorites || []).map((fav) => ({
       ...fav.toJSON(),
-      type: 'internal'
+      type: "internal",
     }));
-    
+
     // External favorites (from user.externalFavorites)
-    const externalFavorites = (user.externalFavorites || []).map(fav => ({
+    const externalFavorites = (user.externalFavorites || []).map((fav) => ({
       id: fav.externalId,
       url: fav.url,
       thumb: fav.thumb,
       author: fav.author,
       Title: fav.title,
-      type: 'external',
-      dateAdded: fav.dateAdded
+      type: "external",
+      dateAdded: fav.dateAdded,
     }));
 
     const allFavorites = [...internalFavorites, ...externalFavorites];
-    
+
     res.json({ items: allFavorites });
   } catch (e) {
     console.error("Error in all-favorites route:", e);
@@ -345,7 +370,7 @@ router.post("/:id/favorite", requireAuth, async (req, res, next) => {
     await User.findByIdAndUpdate(
       req.user.id,
       { $addToSet: { favorites: req.params.id } },
-      { new: true }
+      { new: true },
     );
     res.json({ ok: true });
   } catch (e) {
@@ -369,7 +394,7 @@ router.delete("/:id/favorite", requireAuth, async (req, res, next) => {
     await User.findByIdAndUpdate(
       req.user.id,
       { $pull: { favorites: req.params.id } },
-      { new: true }
+      { new: true },
     );
     res.json({ ok: true });
   } catch (e) {
@@ -378,3 +403,4 @@ router.delete("/:id/favorite", requireAuth, async (req, res, next) => {
 });
 
 export default router;
+
