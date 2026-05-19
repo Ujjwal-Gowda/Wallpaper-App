@@ -1,18 +1,18 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   Heart,
   Download,
   ChevronLeft,
-  Share2,
   Send,
-  MessageCircle,
   X,
   MessageSquare,
   Trash2,
   Loader2,
+  CornerDownRight,
+  Reply,
 } from "lucide-react";
 import axios from "axios";
-import { API_ENDPOINTS, SOCKET_URL, API_BASE_URL } from "../config/api.js";
+import { API_ENDPOINTS } from "../config/api.js";
 import Masonry from "react-masonry-css";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { useAuth } from "../hooks/useAuth.js";
@@ -38,24 +38,19 @@ export default function ImageModal({
   const [relatedImages, setRelatedImages] = useState([]);
   const [loadingRelated, setLoadingRelated] = useState(true);
 
-  // Tab: "related" | "chat" | "comments"
-  // Uploaded images: related + chat + comments
-  // Unsplash/local images: related + comments only
+  // Tab: "related" | "comments"
   const isUploaded = isUploadedImage(image?.id);
   const [activeTab, setActiveTab] = useState("related");
-
-  // Private chat (uploaded images only)
-  const [chatMessages, setChatMessages] = useState([]);
-  const [chatInput, setChatInput] = useState("");
-  const chatEndRef = useRef(null);
 
   // Public comments (all images)
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
   const [loadingComments, setLoadingComments] = useState(false);
   const [postingComment, setPostingComment] = useState(false);
+  const [replyTo, setReplyTo] = useState(null); // { id, name }
 
   const scrollContainerRef = useRef(null);
+  const commentInputRef = useRef(null);
   const currentUserId = user?.id || user?._id;
 
   // ── Theme helpers ──────────────────────────────────────────────────────
@@ -88,11 +83,8 @@ export default function ImageModal({
     const fetchRelated = async () => {
       try {
         if (isUploaded) {
-          // For uploaded images: use our new internal related endpoint
           const res = await axios.get(API_ENDPOINTS.RELATED(image.id));
           let items = res.data.items || [];
-
-          // If not enough internal related, fill with search
           if (items.length < 6) {
             const title = image.Title || image.description || "";
             const searchQuery = encodeURIComponent(
@@ -108,7 +100,6 @@ export default function ImageModal({
           }
           setRelatedImages(items);
         } else {
-          // Unsplash / local images
           const res = await axios.get(
             API_ENDPOINTS.EXTERNAL_IMAGE_RELATED(image.id),
           );
@@ -116,55 +107,36 @@ export default function ImageModal({
         }
       } catch (err) {
         console.error("Related images error:", err);
-        setRelatedImages([]);
       } finally {
         setLoadingRelated(false);
       }
     };
-
     fetchRelated();
   }, [image?.id, isUploaded]);
 
-  // ── Socket for private chat & public comments ─────────────────────────
+  // ── Socket for public comments ─────────────────────────
   useEffect(() => {
     if (!image || !globalSocket) return;
 
-    // 1. Setup Private Chat (only if uploaded)
-    if (isUploaded) {
-      setChatMessages([]);
-      globalSocket.emit("join_room", image.id);
-
-      const handleChatHistory = (history) => setChatMessages(history);
-      const handleReceiveMessage = (message) => {
-        setChatMessages((prev) => {
-          const exists = prev.some(
-            (m) => m.id === message.id || m._id === message._id,
-          );
-          if (exists) return prev;
-          return [...prev, message];
-        });
-      };
-
-      globalSocket.on("chat_history", handleChatHistory);
-      globalSocket.on("receive_message", handleReceiveMessage);
-
-      return () => {
-        globalSocket.off("chat_history", handleChatHistory);
-        globalSocket.off("receive_message", handleReceiveMessage);
-      };
-    }
-
-    // 2. Setup Public Comments (for all images)
+    setLoadingComments(true);
     setComments([]);
+    setReplyTo(null);
+
     globalSocket.emit("join_comments", image.id);
 
-    const handleCommentsHistory = (history) => setComments(history);
+    const handleCommentsHistory = (history) => {
+      setComments(history);
+      setLoadingComments(false);
+    };
+    
     const handleReceiveComment = (comment) => {
       setComments((prev) => {
         const exists = prev.some(
-          (c) => c.id === comment.id || c._id === comment._id,
+          (c) => (c.id && (c.id === comment.id)) || (c._id && (c._id === comment._id)) || (c.tempId && c.tempId === comment.tempId)
         );
-        if (exists) return prev;
+        if (exists) {
+           return prev.map(c => (c.tempId === comment.tempId) ? comment : c);
+        }
         return [...prev, comment];
       });
     };
@@ -176,21 +148,14 @@ export default function ImageModal({
       globalSocket.off("comments_history", handleCommentsHistory);
       globalSocket.off("receive_comment", handleReceiveComment);
     };
-  }, [image?.id, isUploaded, globalSocket]);
+  }, [image?.id, globalSocket]);
 
-  // ── Misc effects ──────────────────────────────────────────────────────
   useEffect(() => {
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = "";
     };
   }, []);
-
-  useEffect(() => {
-    if (activeTab === "chat") {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [chatMessages, activeTab]);
 
   useEffect(() => {
     const handleKey = (e) => {
@@ -229,79 +194,46 @@ export default function ImageModal({
     }
   };
 
-  const handleShare = async () => {
-    const shareUrl = image.link || window.location.href;
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: "Wallpaper App",
-          text: `Check out this wallpaper`,
-          url: shareUrl,
-        });
-      } catch (e) {
-        if (e.name !== "AbortError") {
-          await navigator.clipboard.writeText(shareUrl);
-          addNotification("🔗 Link copied!", "success");
-        }
-      }
-    } else {
-      await navigator.clipboard.writeText(shareUrl);
-      addNotification("🔗 Link copied!", "success");
-    }
-  };
-
   const handleFavoriteToggle = async () => {
     await toggleFavorite(image);
-    addNotification(
-      isFavorite ? "💔 Removed from favorites" : "❤️ Added to favorites!",
-      isFavorite ? "info" : "success",
-    );
-  };
-
-  // ── Private chat send ─────────────────────────────────────────────────
-  const sendChat = () => {
-    const msg = chatInput.trim();
-    if (!msg || !user || !globalSocket) return;
-    globalSocket.emit("send_message", {
-      imageId: image.id,
-      senderId: currentUserId,
-      text: msg,
-    });
-    setChatInput("");
-  };
-
-  const handleChatKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendChat();
-    }
-  };
-
-  const isOwnMessage = (msg) => {
-    const senderId =
-      msg.sender?.id || msg.sender?._id?.toString() || msg.senderId?.toString();
-    return senderId === currentUserId?.toString();
   };
 
   // ── Public comment post ───────────────────────────────────────────────
   const postComment = async () => {
     const text = commentInput.trim();
     if (!text || !user || !globalSocket) return;
-    setPostingComment(true);
+    
+    const tempId = Date.now().toString();
+    const optimisticComment = {
+      tempId,
+      text: text,
+      author: {
+        id: currentUserId,
+        name: user.name || "You",
+      },
+      parentComment: replyTo?.id || null,
+      createdAt: new Date().toISOString(),
+    };
+
+    setComments((prev) => [...prev, optimisticComment]);
+    setCommentInput("");
+    setReplyTo(null);
+
     try {
       globalSocket.emit("send_comment", {
         imageId: image.id,
         senderId: currentUserId,
         text: text,
+        tempId,
+        parentCommentId: replyTo?.id || null,
       });
-      setCommentInput("");
     } catch (err) {
       console.error("Post comment error:", err);
       addNotification("Failed to post comment", "error");
-    } finally {
-      setPostingComment(false);
+      setComments((prev) => prev.filter(c => c.tempId !== tempId));
     }
   };
+
   const handleCommentKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -320,6 +252,11 @@ export default function ImageModal({
     } catch (err) {
       console.error("Delete comment error:", err);
     }
+  };
+
+  const startReply = (commentId, authorName) => {
+    setReplyTo({ id: commentId, name: authorName });
+    commentInputRef.current?.focus();
   };
 
   // ── Tabs config ────────────────────────────────────────────────────────
@@ -343,16 +280,6 @@ export default function ImageModal({
         </svg>
       ),
     },
-    ...(isUploaded
-      ? [
-          {
-            id: "chat",
-            label: "Chat",
-            icon: <MessageCircle size={15} />,
-            badge: chatMessages.length,
-          },
-        ]
-      : []),
     {
       id: "comments",
       label: "Comments",
@@ -363,9 +290,68 @@ export default function ImageModal({
 
   const masonryBreaks = { default: 2, 1100: 1 };
 
+  const renderComment = (comment, allComments, isReply = false) => {
+    const isOwn = String(comment.author?._id || comment.author?.id || comment.author) === String(currentUserId) || 
+                  String(comment.sender?._id || comment.sender?.id || comment.sender) === String(currentUserId);
+    
+    const authorName = comment.author?.name || comment.sender?.name || "User";
+    const initial = authorName.charAt(0).toUpperCase();
+    const replies = allComments.filter(c => String(c.parentComment) === String(comment.id || comment._id));
+
+    return (
+      <div key={comment.id || comment._id || comment.tempId} className={`flex flex-col ${isReply ? 'mt-2' : 'mt-5'}`}>
+        <div className="flex gap-3 group">
+          <div
+            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 shadow-sm border border-base-300/50"
+            style={{
+              backgroundColor: isDark ? "#2a2a2a" : "#f0f0f0",
+              color: isDark ? "#aaa" : "#666",
+            }}
+          >
+            {initial}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-2 mb-0.5">
+              <span className="text-sm font-bold" style={{ color: textPrimary }}>
+                {authorName}
+              </span>
+              <span className="text-[10px] uppercase font-bold tracking-wider opacity-30">
+                {new Date(comment.createdAt).toLocaleDateString()}
+              </span>
+            </div>
+            <p className="text-sm leading-relaxed" style={{ color: isDark ? "#ccc" : "#444" }}>
+              {comment.text}
+            </p>
+            <div className="flex gap-4 mt-1.5">
+              <button 
+                onClick={() => startReply(comment.id || comment._id, authorName)}
+                className="flex items-center gap-1 text-[11px] font-bold text-base-content/50 hover:text-primary transition-colors"
+              >
+                <Reply size={12} /> Reply
+              </button>
+              {isOwn && (
+                <button
+                  onClick={() => deleteComment(comment.id || comment._id)}
+                  className="flex items-center gap-1 text-[11px] font-bold text-error/60 hover:text-error opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Trash2 size={12} /> Delete
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        {replies.length > 0 && (
+          <div className="border-l-2 border-base-content/5 ml-4 pl-4 mt-2 hover:border-primary/30 transition-colors">
+            {replies.map(reply => renderComment(reply, allComments, true))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <>
-      {/* Backdrop */}
       <div
         className="fixed inset-0 z-[9998]"
         style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
@@ -373,7 +359,6 @@ export default function ImageModal({
         aria-hidden="true"
       />
 
-      {/* Modal */}
       <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 md:p-4 pointer-events-none">
         <div
           data-theme={theme}
@@ -386,7 +371,6 @@ export default function ImageModal({
             className="flex-[1.2] flex flex-col relative overflow-hidden min-w-0"
             style={{ backgroundColor: bgAlt, borderRight: border }}
           >
-            {/* Back button */}
             <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
               <button
                 onClick={onClose}
@@ -397,7 +381,6 @@ export default function ImageModal({
               </button>
             </div>
 
-            {/* Mobile close */}
             <button
               onClick={onClose}
               className="absolute top-4 right-4 z-20 btn btn-circle btn-sm border-none text-white backdrop-blur-sm md:hidden"
@@ -406,7 +389,6 @@ export default function ImageModal({
               <X size={16} />
             </button>
 
-            {/* Image */}
             <div className="flex-1 flex items-center justify-center p-6 md:p-10 overflow-hidden">
               <img
                 src={image.url}
@@ -415,7 +397,6 @@ export default function ImageModal({
               />
             </div>
 
-            {/* Action bar */}
             <div
               className="shrink-0 p-4 flex items-center gap-3"
               style={{ backgroundColor: bg, borderTop: border }}
@@ -438,13 +419,6 @@ export default function ImageModal({
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
-                {/* <button */}
-                {/*   onClick={handleShare} */}
-                {/*   className="btn btn-circle btn-ghost btn-sm" */}
-                {/*   title="Share" */}
-                {/* > */}
-                {/*   <Share2 size={18} /> */}
-                {/* </button> */}
                 <button
                   onClick={handleFavoriteToggle}
                   className={`btn btn-circle btn-sm transition-colors ${
@@ -476,7 +450,6 @@ export default function ImageModal({
             className="flex-1 flex flex-col min-h-0 min-w-0"
             style={{ backgroundColor: bg }}
           >
-            {/* Tab bar */}
             <div
               className="shrink-0 flex"
               style={{ borderBottom: border, backgroundColor: bg }}
@@ -505,9 +478,7 @@ export default function ImageModal({
               ))}
             </div>
 
-            {/* Tab content */}
             <div className="flex-1 overflow-y-auto" ref={scrollContainerRef}>
-              {/* ── Related images ── */}
               {activeTab === "related" && (
                 <div className="p-4">
                   {loadingRelated ? (
@@ -559,151 +530,13 @@ export default function ImageModal({
                 </div>
               )}
 
-              {/* ── Private Chat (uploaded images only) ── */}
-              {activeTab === "chat" && isUploaded && (
-                <div className="flex flex-col h-full min-h-[400px]">
-                  <div
-                    className="px-4 py-2 text-xs"
-                    style={{
-                      backgroundColor: isDark ? "#252525" : "#f9f9f9",
-                      color: textMuted,
-                      borderBottom: border,
-                    }}
-                  >
-                    💬 Private chat — messages are between you and the uploader
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-                    {chatMessages.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-16 text-center">
-                        <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                          <MessageCircle
-                            size={28}
-                            className="text-primary opacity-60"
-                          />
-                        </div>
-                        <p
-                          className="font-semibold"
-                          style={{ color: textMuted }}
-                        >
-                          No messages yet
-                        </p>
-                        <p
-                          className="text-sm mt-1"
-                          style={{ color: isDark ? "#555" : "#bbb" }}
-                        >
-                          Start a conversation about this wallpaper!
-                        </p>
-                      </div>
-                    ) : (
-                      chatMessages.map((msg, i) => {
-                        const own = isOwnMessage(msg);
-                        const senderName = msg.sender?.name || "User";
-                        const initial = senderName.charAt(0).toUpperCase();
-                        return (
-                          <div
-                            key={msg.id || msg._id || i}
-                            className={`flex gap-2 ${own ? "flex-row-reverse" : "flex-row"}`}
-                          >
-                            <div
-                              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-1 ${own ? "bg-primary text-primary-content" : ""}`}
-                              style={
-                                !own
-                                  ? {
-                                      backgroundColor: isDark
-                                        ? "#444"
-                                        : "#e0e0e0",
-                                      color: isDark ? "#ccc" : "#555",
-                                    }
-                                  : {}
-                              }
-                            >
-                              {initial}
-                            </div>
-                            <div
-                              className={`flex flex-col gap-1 max-w-[75%] ${own ? "items-end" : "items-start"}`}
-                            >
-                              <span
-                                className="text-xs px-1"
-                                style={{ color: textMuted }}
-                              >
-                                {own ? "You" : senderName}
-                              </span>
-                              <div
-                                className={`px-3 py-2 rounded-2xl text-sm leading-relaxed ${own ? "bg-primary text-primary-content rounded-tr-sm" : ""}`}
-                                style={
-                                  !own
-                                    ? {
-                                        backgroundColor: bubbleBg,
-                                        color: bubbleText,
-                                        borderTopLeftRadius: "2px",
-                                      }
-                                    : {}
-                                }
-                              >
-                                {msg.text}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                    <div ref={chatEndRef} />
-                  </div>
-
-                  <div
-                    className="shrink-0 p-4"
-                    style={{ borderTop: border, backgroundColor: bg }}
-                  >
-                    {user ? (
-                      <div className="flex gap-2 items-center">
-                        <input
-                          type="text"
-                          value={chatInput}
-                          onChange={(e) => setChatInput(e.target.value)}
-                          onKeyDown={handleChatKeyDown}
-                          placeholder="Message… (Enter to send)"
-                          className="input input-bordered input-sm flex-1 rounded-full h-10"
-                          maxLength={500}
-                        />
-                        <button
-                          onClick={sendChat}
-                          disabled={!chatInput.trim()}
-                          className="btn btn-primary btn-circle btn-sm disabled:opacity-40"
-                        >
-                          <Send size={15} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div
-                        className="flex items-center gap-3 py-2 px-4 rounded-full text-sm"
-                        style={{
-                          backgroundColor: isDark ? "#2a2a2a" : "#f5f5f5",
-                          color: textMuted,
-                        }}
-                      >
-                        <MessageCircle size={16} className="shrink-0" />
-                        <span>
-                          <a href="/login" className="link link-primary">
-                            Sign in
-                          </a>{" "}
-                          to chat
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* ── Public Comments (all images) ── */}
               {activeTab === "comments" && (
                 <div className="flex flex-col h-full min-h-[400px]">
-                  <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+                  <div className="flex-1 overflow-y-auto p-4 flex flex-col">
                     {loadingComments ? (
-                      <div className="flex justify-center items-center py-16">
-                        <Loader2
-                          className="animate-spin text-primary"
-                          size={32}
-                        />
+                      <div className="flex flex-col items-center justify-center py-20">
+                        <span className="loading loading-spinner loading-lg text-primary" />
+                        <p className="text-sm mt-4 opacity-50">Loading comments...</p>
                       </div>
                     ) : comments.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -727,72 +560,37 @@ export default function ImageModal({
                         </p>
                       </div>
                     ) : (
-                      comments.map((c) => {
-                        const isOwn =
-                          String(c.author?._id || c.author?.id || c.author) ===
-                          String(currentUserId);
-                        const authorName = c.author?.name || "User";
-                        const initial = authorName.charAt(0).toUpperCase();
-                        return (
-                          <div key={c.id || c._id} className="flex gap-3 group">
-                            <div
-                              className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 mt-0.5"
-                              style={{
-                                backgroundColor: isDark ? "#3a3a3a" : "#e8e8e8",
-                                color: isDark ? "#ccc" : "#555",
-                              }}
-                            >
-                              {initial}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-baseline gap-2 mb-1">
-                                <span
-                                  className="text-sm font-semibold"
-                                  style={{ color: textPrimary }}
-                                >
-                                  {authorName}
-                                </span>
-                                <span
-                                  className="text-xs"
-                                  style={{ color: isDark ? "#555" : "#bbb" }}
-                                >
-                                  {new Date(c.createdAt).toLocaleDateString()}
-                                </span>
-                              </div>
-                              <p
-                                className="text-sm leading-relaxed"
-                                style={{ color: isDark ? "#ccc" : "#444" }}
-                              >
-                                {c.text}
-                              </p>
-                            </div>
-                            {isOwn && (
-                              <button
-                                onClick={() => deleteComment(c.id || c._id)}
-                                className="opacity-0 group-hover:opacity-100 btn btn-ghost btn-xs btn-circle transition-opacity shrink-0"
-                                style={{ color: isDark ? "#666" : "#ccc" }}
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })
+                      comments.filter(c => !c.parentComment).map(c => renderComment(c, comments))
                     )}
                   </div>
 
                   <div
-                    className="shrink-0 p-4"
+                    className="shrink-0 p-4 flex flex-col gap-2"
                     style={{ borderTop: border, backgroundColor: bg }}
                   >
+                    {replyTo && (
+                      <div className="flex items-center justify-between bg-base-200 px-3 py-1.5 rounded-lg text-xs">
+                        <span className="flex items-center gap-2">
+                          <CornerDownRight size={14} className="text-primary" />
+                          Replying to <span className="font-bold text-primary">{replyTo.name}</span>
+                        </span>
+                        <button 
+                          onClick={() => setReplyTo(null)}
+                          className="btn btn-ghost btn-xs btn-circle"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    )}
                     {user ? (
                       <div className="flex gap-2 items-center">
                         <input
+                          ref={commentInputRef}
                           type="text"
                           value={commentInput}
                           onChange={(e) => setCommentInput(e.target.value)}
                           onKeyDown={handleCommentKeyDown}
-                          placeholder="Add a comment… (Enter to post)"
+                          placeholder={replyTo ? "Write a reply..." : "Add a comment..."}
                           className="input input-bordered input-sm flex-1 rounded-full h-10"
                           maxLength={1000}
                           disabled={postingComment}

@@ -168,73 +168,6 @@ io.on("connection", (socket) => {
     console.log(`User ${userId} registered socket ${socket.id}`);
   });
 
-  // private chat
-  socket.on("join_room", (imageId) => {
-    socket.join(`private_${imageId}`);
-    console.log(`Socket ${socket.id} joined private room ${imageId}`);
-
-    // chat history
-    if (imageId.length === 24) {
-      Message.find({ imageId })
-        .sort({ createdAt: 1 })
-        .populate("sender", "name email")
-        .then((messages) => {
-          socket.emit("chat_history", messages);
-        })
-        .catch((err) => console.error("Error fetching chat history:", err));
-    }
-  });
-
-  socket.on("send_message", async (data) => {
-    const { imageId, senderId, text } = data;
-
-    if (!imageId || imageId.length !== 24) {
-      socket.emit("chat_error", {
-        message: "Private chat only available for uploaded images",
-      });
-      return;
-    }
-
-    try {
-      const message = await Message.create({ imageId, sender: senderId, text });
-      const populatedMessage = await message.populate("sender", "name email");
-
-      io.to(`private_${imageId}`).emit("receive_message", populatedMessage);
-
-      const image = await Image.findById(imageId).populate("owner");
-      if (
-        image &&
-        image.owner &&
-        String(image.owner._id) !== String(senderId)
-      ) {
-        const ownerId = String(image.owner._id);
-        const sender = await User.findById(senderId);
-        const senderName = sender ? sender.name : "A user";
-
-        const ownerSockets = userSockets.get(ownerId);
-        if (ownerSockets && ownerSockets.size > 0) {
-          ownerSockets.forEach((socketId) => {
-            io.to(socketId).emit("new_message_notification", {
-              imageId,
-              imageTitle: image.Title || "your wallpaper",
-              senderName,
-              text: text.slice(0, 60),
-            });
-          });
-        }
-
-        // Email notification
-        await sendNotificationEmail(
-          image.owner.email,
-          image.Title || "Wallpaper",
-          senderName,
-        );
-      }
-    } catch (err) {
-      console.error("Error saving message:", err);
-    }
-  });
-
   // public comments
   socket.on("join_comments", (imageId) => {
     socket.join(`comments_${imageId}`);
@@ -250,13 +183,21 @@ io.on("connection", (socket) => {
   });
 
   socket.on("send_comment", async (data) => {
-    const { imageId, senderId, text } = data;
+    const { imageId, senderId, text, tempId, parentCommentId } = data;
 
     try {
-      const comment = await Comment.create({ imageId, sender: senderId, text });
+      const commentData = { imageId, sender: senderId, text };
+      if (parentCommentId) {
+        commentData.parentComment = parentCommentId;
+      }
+      
+      const comment = await Comment.create(commentData);
       const populatedComment = await comment.populate("sender", "name email");
 
-      io.to(`comments_${imageId}`).emit("receive_comment", populatedComment);
+      const commentObj = populatedComment.toObject();
+      commentObj.tempId = tempId;
+
+      io.to(`comments_${imageId}`).emit("receive_comment", commentObj);
     } catch (err) {
       console.error("Error saving comment:", err);
     }

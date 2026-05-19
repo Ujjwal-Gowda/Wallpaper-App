@@ -17,6 +17,10 @@ export const API_ENDPOINTS = {
 
   PROFILE: `${API_BASE_URL}/profile`,
 
+  STATIC_IMAGES: isProduction
+    ? "https://wallpaper-app-1-9rq5.onrender.com/static-images"
+    : "http://localhost:5000/static-images",
+
   EXTERNAL_IMAGES: `${API_BASE_URL}/external`,
   EXTERNAL_IMAGE_DETAIL: (id) => `${API_BASE_URL}/external/${id}`,
   EXTERNAL_IMAGE_RELATED: (id) => `${API_BASE_URL}/external/${id}/related`,

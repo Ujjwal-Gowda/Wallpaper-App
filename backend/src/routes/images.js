@@ -223,24 +223,24 @@ router.get(
 // POST /images/external-favorite → add external image to favorites
 router.post("/external-favorite", requireAuth, async (req, res, next) => {
   try {
-    console.log("Adding external favorite:", req.body);
-    console.log("User ID:", req.user.id);
-
-    // Validate user ID format
-    if (!mongoose.Types.ObjectId.isValid(req.user.id)) {
-      return res.status(400).json({ message: "Invalid user ID" });
-    }
-
     const { externalId, url, thumb, author, title = "" } = req.body;
 
     if (!externalId || !url) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    // Check if user exists
-    const existingUser = await User.findById(req.user.id);
-    if (!existingUser) {
+    const user = await User.findById(req.user.id);
+    if (!user) {
       return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check for duplicate
+    const isAlreadyFavorite = user.externalFavorites.some(
+      (fav) => fav.externalId === externalId
+    );
+
+    if (isAlreadyFavorite) {
+      return res.json({ ok: true, message: "Already in favorites" });
     }
 
     const favoriteData = {
@@ -253,21 +253,10 @@ router.post("/external-favorite", requireAuth, async (req, res, next) => {
       dateAdded: new Date(),
     };
 
-    console.log("Favorite data:", favoriteData);
-
-    // Initialize externalFavorites array if it doesn't exist
-    const updateQuery = existingUser.externalFavorites
-      ? { $addToSet: { externalFavorites: favoriteData } }
-      : { $set: { externalFavorites: [favoriteData] } };
-
-    const updatedUser = await User.findByIdAndUpdate(req.user.id, updateQuery, {
-      new: true,
+    await User.findByIdAndUpdate(req.user.id, {
+      $addToSet: { externalFavorites: favoriteData },
     });
 
-    console.log(
-      "Updated user external favorites:",
-      updatedUser?.externalFavorites,
-    );
     res.json({ ok: true });
   } catch (e) {
     console.error("Error in external-favorite route:", e);

@@ -119,7 +119,7 @@ export default function Favourite() {
         }),
       );
       if (selectedImage?.id === favId) setSelectedImage(null);
-      addNotif("💔 Removed from favorites", "info");
+      addNotif("Removed from favorites", "info");
     } catch (err) {
       console.error("Error removing favorite:", err);
       addNotif("Failed to remove favorite", "error");

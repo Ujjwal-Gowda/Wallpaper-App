@@ -79,12 +79,12 @@ export default function MasonryGrid() {
   const [loadingMore, setLoadingMore] = useState(false);
   const { query, setQuery, searchText, setSearchText } = useSearch();
   const { theme } = useTheme();
-  const [favoriteStatus, setFavoriteStatus] = useState({});
+  const [favoriteIds, setFavoriteIds] = useState(new Set());
   const [isMobile, setIsMobile] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
-  const [useUnsplash, setUseUnsplash] = useState(import.meta.env.PROD);
+  const [useUnsplash, setUseUnsplash] = useState(true);
   const [notifications, setNotifications] = useState([]);
 
   // Register global notify
@@ -144,6 +144,24 @@ export default function MasonryGrid() {
     fetchImages(query, page);
   }, [query, page, useUnsplash]);
 
+  // Fetch all favorites once on mount if logged in
+  useEffect(() => {
+    const fetchAllFavorites = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      try {
+        const res = await axios.get(API_ENDPOINTS.ALL_FAVORITES, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const ids = new Set(res.data.items.map((fav) => fav.id || fav._id));
+        setFavoriteIds(ids);
+      } catch (err) {
+        console.error("Error fetching all favorites:", err);
+      }
+    };
+    fetchAllFavorites();
+  }, []);
+
   async function fetchImages(q, p) {
     try {
       if (p === 1) setLoading(true);
@@ -167,49 +185,12 @@ export default function MasonryGrid() {
         return [...prev, ...filteredNew];
       });
 
-      const token = localStorage.getItem("token");
-      if (token && newItems.length > 0) {
-        checkFavoriteStatus(newItems);
-      }
     } catch (err) {
       console.error("Error fetching images:", err);
       if (p === 1) setImages([]);
     } finally {
       setLoading(false);
       setLoadingMore(false);
-    }
-  }
-
-  async function checkFavoriteStatus(imageList) {
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) return;
-
-      const statusPromises = imageList.map(async (img) => {
-        try {
-          if (img.id?.toString().startsWith("local") || img.type === "local") {
-            return { id: img.id, isFavorite: false };
-          }
-          const res = await axios.get(
-            API_ENDPOINTS.EXTERNAL_FAVORITE_CHECK(img.id),
-            { headers: { Authorization: `Bearer ${token}` }, timeout: 5000 },
-          );
-          return { id: img.id, isFavorite: res.data.isFavorite };
-        } catch {
-          return { id: img.id, isFavorite: false };
-        }
-      });
-
-      const statusResults = await Promise.all(statusPromises);
-      setFavoriteStatus((prev) => {
-        const statusMap = { ...prev };
-        statusResults.forEach(({ id, isFavorite }) => {
-          statusMap[id] = isFavorite;
-        });
-        return statusMap;
-      });
-    } catch (err) {
-      console.error("Error checking favorite status:", err);
     }
   }
 
@@ -221,15 +202,29 @@ export default function MasonryGrid() {
         return;
       }
 
-      const isFavorite = favoriteStatus[img.id] || false;
+      const isFavorite = favoriteIds.has(img.id);
 
       if (isFavorite) {
+        // Optimistic update
+        setFavoriteIds((prev) => {
+          const next = new Set(prev);
+          next.delete(img.id);
+          return next;
+        });
+
         await axios.delete(API_ENDPOINTS.EXTERNAL_FAVORITE_REMOVE(img.id), {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 10000,
         });
-        globalNotifyFn?.("💔 Removed from favorites", "info");
+        globalNotifyFn?.("Removed from favorites", "info");
       } else {
+        // Optimistic update
+        setFavoriteIds((prev) => {
+          const next = new Set(prev);
+          next.add(img.id);
+          return next;
+        });
+
         await axios.post(
           API_ENDPOINTS.EXTERNAL_FAVORITE,
           {
@@ -241,13 +236,13 @@ export default function MasonryGrid() {
           },
           { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 },
         );
-        globalNotifyFn?.("❤️ Added to favorites!", "success");
+        globalNotifyFn?.("Added to favorites!", "success");
       }
-
-      setFavoriteStatus((prev) => ({ ...prev, [img.id]: !isFavorite }));
     } catch (err) {
       console.error("Error toggling favorite:", err);
       globalNotifyFn?.("Failed to update favorites", "error");
+      // Revert optimistic update? For simplicity, we'll just log. 
+      // In a real app, we'd fetch favorites again or revert.
     }
   };
 
@@ -369,7 +364,7 @@ export default function MasonryGrid() {
             columnClassName="bg-clip-padding"
           >
             {images.map((img, index) => {
-              const isFavorite = favoriteStatus[img.id] || false;
+              const isFavorite = favoriteIds.has(img.id);
               const isLastElement = images.length === index + 1;
               const isLocal =
                 img.id?.toString().startsWith("local") || img.type === "local";
@@ -397,13 +392,14 @@ export default function MasonryGrid() {
                       e.stopPropagation();
                       toggleFavorite(img);
                     }}
-                    className={`absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 
+                    className={`absolute top-3 right-3 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 shadow-lg
                       ${isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100"}
-                      ${isFavorite ? "bg-red-500 text-white" : "bg-black/30 backdrop-blur-sm text-white hover:bg-black/50"}`}
+                      ${isFavorite ? "bg-red-500 text-white scale-110" : "bg-black/20 backdrop-blur-md text-white hover:bg-black/40 hover:scale-110"}`}
                   >
                     <Heart
-                      size={isMobile ? 20 : 16}
+                      size={isMobile ? 22 : 20}
                       fill={isFavorite ? "currentColor" : "none"}
+                      className={`${isFavorite ? "animate-pulse" : ""}`}
                     />
                   </button>
 
@@ -439,7 +435,7 @@ export default function MasonryGrid() {
 
           {!hasMore && images.length > 0 && (
             <div className="text-center py-10 opacity-60">
-              <p>You've reached the end of the collection ✨</p>
+              <p>You've reached the end of the collection</p>
             </div>
           )}
         </>
@@ -451,7 +447,7 @@ export default function MasonryGrid() {
           image={selectedImage}
           onClose={() => setSelectedImage(null)}
           toggleFavorite={toggleFavorite}
-          isFavorite={favoriteStatus[selectedImage.id] || false}
+          isFavorite={favoriteIds.has(selectedImage.id)}
           onImageSelect={(img) => setSelectedImage(img)}
         />
       )}

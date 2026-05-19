@@ -165,7 +165,7 @@ export default function UploadPage() {
         await axios.delete(`${API_BASE_URL}/images/${img.id}/favorite`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        addToast("💔 Removed from favorites", "info");
+        addToast("Removed from favorites", "info");
       } else {
         await axios.post(
           `${API_BASE_URL}/images/${img.id}/favorite`,
@@ -174,7 +174,7 @@ export default function UploadPage() {
             headers: { Authorization: `Bearer ${token}` },
           },
         );
-        addToast("❤️ Added to favorites!", "success");
+        addToast("Added to favorites!", "success");
       }
       setFavoriteStatus((prev) => ({ ...prev, [img.id]: !isFav }));
     } catch (err) {

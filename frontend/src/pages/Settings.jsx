@@ -1,5 +1,5 @@
 import { useTheme } from "../context/ThemeContext.jsx";
-import { Palette, Check, Sparkles } from "lucide-react";
+import { Palette, Check } from "lucide-react";
 
 const themes = [
   { name: "light", icon: "☀️", desc: "Clean & Bright", category: "Basic" },
@@ -40,7 +40,6 @@ export default function Settings() {
         {/* Theme Selection */}
         <div className="mb-8">
           <h3 className="text-2xl font-semibold text-base-content mb-4 flex items-center gap-2">
-            <Sparkles size={20} className="text-primary" />
             Choose Your Theme
           </h3>
 
@@ -96,7 +95,6 @@ export default function Settings() {
         {/* Tips Section */}
         <div className="alert alert-info mt-8">
           <div className="flex items-center gap-2">
-            <Sparkles className="text-info" size={20} />
             <div>
               <h4 className="font-semibold">Pro Tip:</h4>
               <p className="text-sm">Your theme preference is automatically saved and will be applied across all pages!</p>
